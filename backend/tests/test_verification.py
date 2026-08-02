@@ -32,7 +32,7 @@ def test_rung1_tool_failure_needs_no_model_call(sentinel):
 def test_rung2_off_target_is_not_done(sentinel):
     """A successful click on the wrong element is not progress."""
     verdict = sentinel.verify(
-        PlanStep(description="open Arundhati's chat", target="Arundhati"),
+        PlanStep(description="open Alice's chat", target="Alice"),
         {"status": "success", "tool": "click_coordinate", "on_target": False,
          "scope_reason": "landed on 'Instagram Messages'"},
         snapshot([]), snapshot([]),
@@ -44,11 +44,11 @@ def test_rung2_off_target_is_not_done(sentinel):
 
 def test_rung3_success_criteria_newly_visible_means_done(sentinel):
     before = snapshot([el("Inbox", "ListItemControl")], title="Instagram")
-    after = snapshot([el("Arundhati Sharma", "ListItemControl"), el("Message...", "EditControl")],
+    after = snapshot([el("Alice Johnson", "ListItemControl"), el("Message...", "EditControl")],
                      title="Instagram")
     verdict = sentinel.verify(
-        PlanStep(description="open the chat with Arundhati", target="Arundhati"),
-        {"status": "success", "tool": "click_coordinate", "matched_name": "Arundhati Sharma"},
+        PlanStep(description="open the chat with Alice", target="Alice"),
+        {"status": "success", "tool": "click_coordinate", "matched_name": "Alice Johnson"},
         before, after,
     )
     assert verdict.done is True
@@ -203,29 +203,29 @@ def test_informational_answer_is_the_reply_not_buried_under_done(narrator):
 
 
 def test_partial_completion_is_reported_honestly(narrator):
-    plan = Plan(goal="open instagram then message arundhati", steps=[
+    plan = Plan(goal="open instagram then message alice", steps=[
         PlanStep(description="open instagram", done=True),
-        PlanStep(description="message arundhati", done=False, evidence="I couldn't find her in the list"),
+        PlanStep(description="message alice", done=False, evidence="I couldn't find her in the list"),
     ])
     response = narrator.compose(plan, [{"status": "success", "tool": "open_social_inbox"}])
 
     assert "1 of 2" in response.spoken
-    assert "message arundhati" in response.spoken
+    assert "message alice" in response.spoken
     assert "couldn't find her" in response.spoken
 
 
 def test_detail_report_shows_plan_grounding_and_evidence(narrator):
-    plan = Plan(goal="open the chat of Arundhati", steps=[
-        PlanStep(description="open the chat of Arundhati", target="Arundhati", done=True,
-                 evidence="'Arundhati Sharma' is now visible"),
+    plan = Plan(goal="open the chat of Alice", steps=[
+        PlanStep(description="open the chat of Alice", target="Alice", done=True,
+                 evidence="'Alice Johnson' is now visible"),
     ])
-    results = [{"tool": "click_coordinate", "status": "success", "matched_name": "Arundhati Sharma",
+    results = [{"tool": "click_coordinate", "status": "success", "matched_name": "Alice Johnson",
                 "grounding": {"method": "exact", "confidence": 0.95}}]
     detail = narrator.detail_report(plan, results, elapsed=1.8,
                                     stats={"llm_calls": 2, "tree_walks": 2, "walks_avoided": 3})
 
     assert "[done]" in detail
-    assert "Arundhati Sharma" in detail
+    assert "Alice Johnson" in detail
     assert "grounded via exact" in detail
     assert "2 model calls" in detail
     assert "3 avoided by cache" in detail

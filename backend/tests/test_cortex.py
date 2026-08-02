@@ -13,12 +13,12 @@ from conftest import FakeLLM, FakeOS, FakeTelemetry, FakeVision, el, route, tool
 INBOX = [
     el("Instagram", "TextControl", 200, 40),
     el("Instagram Messages", "TabItemControl", 420, 80),
-    el("Arundhati Sharma", "ListItemControl", 300, 220),
-    el("Rahul Mehta", "ListItemControl", 300, 340),
+    el("Alice Johnson", "ListItemControl", 300, 220),
+    el("Bob Miller", "ListItemControl", 300, 340),
 ]
 
 OPEN_CHAT = [
-    el("Arundhati Sharma", "TextControl", 500, 40),
+    el("Alice Johnson", "TextControl", 500, 40),
     el("Message...", "EditControl", 700, 800),
     el("Send", "ButtonControl", 900, 800),
 ]
@@ -39,7 +39,7 @@ def build(handler=None, elements=None, title="Desktop", memory=None):
             telemetry.title = f"{kw.get('app', 'App')} Window"
             vision.change_screen(elements=[el("New App", "ButtonControl")])
         elif action == "click":
-            telemetry.title = "Instagram Direct - Arundhati Sharma"
+            telemetry.title = "Instagram Direct - Alice Johnson"
             vision.change_screen(elements=OPEN_CHAT)
         elif action == "type_text":
             vision.change_screen(elements=OPEN_CHAT + [el(kw.get("text", "sent"), "TextControl", 600, 700)])
@@ -147,8 +147,8 @@ def test_screen_question_reply_is_the_answer_not_done():
 PLAN_JSON = """{"steps": [
   {"description": "Open the Instagram inbox", "target": "instagram", "lane": "pathfinder",
    "success_criteria": "the Instagram direct inbox is on screen"},
-  {"description": "Open the conversation with Arundhati", "target": "Arundhati", "lane": "hands",
-   "success_criteria": "the conversation with Arundhati is open"}
+  {"description": "Open the conversation with Alice", "target": "Alice", "lane": "hands",
+   "success_criteria": "the conversation with Alice is open"}
 ]}"""
 
 
@@ -157,12 +157,12 @@ def test_multi_step_order_completes_and_stays_on_target():
         triage='{"kind": "multi_step", "confidence": 0.95, "reason": "two actions"}',
         architect=PLAN_JSON,
     ))
-    events, responses = collect(cortex, "open instagram and open the chat of arundhati")
+    events, responses = collect(cortex, "open instagram and open the chat of alice")
 
     assert "open_social_inbox" in os_api.tools_used()
     click = [c for c in os_api.calls if c["action"] == "click"]
     assert click, "the second step must actually click something"
-    assert click[0]["x"] == 300 and click[0]["y"] == 220, "it must click Arundhati's row, not the tab"
+    assert click[0]["x"] == 300 and click[0]["y"] == 220, "it must click Alice's row, not the tab"
 
     assert cortex.last_run["llm_calls"] <= 3, "triage + plan, and nothing per-step"
     assert "All done" in responses[0]["text"] or "done" in responses[0]["text"].lower()
@@ -176,7 +176,7 @@ def test_multi_step_run_costs_far_fewer_calls_than_the_monolith():
         triage='{"kind": "multi_step", "confidence": 0.95, "reason": "two actions"}',
         architect=PLAN_JSON,
     ))
-    collect(cortex, "open instagram and open the chat of arundhati")
+    collect(cortex, "open instagram and open the chat of alice")
 
     assert llm.calls <= 3
     assert llm.tool_schema_count() == 0, "no step needed a tool-calling round-trip at all"
@@ -191,7 +191,7 @@ def test_off_target_click_does_not_complete_the_step():
               hands=tool_call("click_element", text="Instagram Messages")),
         elements=[el("Instagram Messages", "TabItemControl", 420, 80)],
     )
-    _, responses = collect(cortex, "open the chat of Arundhati")
+    _, responses = collect(cortex, "open the chat of Alice")
 
     text = responses[0]["text"].lower()
     assert "all done" not in text
@@ -203,13 +203,13 @@ def test_detail_event_carries_the_full_breakdown():
         triage='{"kind": "multi_step", "confidence": 0.95, "reason": "two"}',
         architect=PLAN_JSON,
     ))
-    events, _ = collect(cortex, "open instagram and open the chat of arundhati")
+    events, _ = collect(cortex, "open instagram and open the chat of alice")
 
     details = [e for e in events if e["type"] == "detail"]
     assert len(details) == 1
     text = details[0]["text"]
     assert "Plan (" in text
-    assert "Arundhati" in text
+    assert "Alice" in text
     assert "model call" in text
     assert details[0]["data"]["steps_total"] == 2
 
@@ -219,7 +219,7 @@ def test_spoken_reply_is_never_markdown():
         triage='{"kind": "multi_step", "confidence": 0.9, "reason": "two"}',
         architect=PLAN_JSON,
     ))
-    _, responses = collect(cortex, "open instagram and open the chat of arundhati")
+    _, responses = collect(cortex, "open instagram and open the chat of alice")
     spoken = responses[0]["text"]
     assert not any(ch in spoken for ch in "*#`_|")
     assert "\n" not in spoken
@@ -291,10 +291,10 @@ def test_history_is_read_not_just_written():
         route(triage='{"kind": "single_action", "confidence": 0.9, "reason": "click"}'),
         elements=INBOX,
     )
-    events, _ = collect(cortex, "open the chat of Arundhati")
+    events, _ = collect(cortex, "open the chat of Alice")
     assert cortex.history
     first = [e for e in events if e["type"] == "tool_exec"][0]
-    assert first["output"]["matched_name"] == "Arundhati Sharma"
+    assert first["output"]["matched_name"] == "Alice Johnson"
 
     # The screen has legitimately moved on by now, so the follow-up must re-resolve the same
     # *referent* against the current screen rather than replay a stale coordinate.
@@ -302,7 +302,7 @@ def test_history_is_read_not_just_written():
     events, _ = collect(cortex, "do it again")
     execs = [e for e in events if e["type"] == "tool_exec"]
     assert execs, "an anaphoric follow-up must still act"
-    assert execs[0]["output"].get("matched_name") == "Arundhati Sharma"
+    assert execs[0]["output"].get("matched_name") == "Alice Johnson"
 
 
 def test_a_repeated_order_becomes_free(memory):
@@ -325,7 +325,7 @@ def test_screen_is_not_re_walked_on_every_perception_request():
         triage='{"kind": "multi_step", "confidence": 0.95, "reason": "two"}',
         architect=PLAN_JSON,
     ), elements=INBOX)
-    collect(cortex, "open instagram and open the chat of arundhati")
+    collect(cortex, "open instagram and open the chat of alice")
 
     stats = cortex.retina.stats()
     assert stats["snapshot_requests"] > stats["tree_walks"]

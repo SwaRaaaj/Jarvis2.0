@@ -110,18 +110,18 @@ def test_targetless_actions_need_no_model_call(hands):
 
 
 def test_click_is_grounded_by_anchor_with_no_model_call(hands, instagram_elements):
-    step = PlanStep(description="open the chat of Arundhati", target="Arundhati")
+    step = PlanStep(description="open the chat of Alice", target="Alice")
     result = hands.execute(step, snapshot(instagram_elements))
 
     assert result["status"] == "success"
-    assert result["matched_name"] == "Arundhati Sharma"
+    assert result["matched_name"] == "Alice Johnson"
     assert result["args"]["x"] == 300 and result["args"]["y"] == 220
     assert result["on_target"] is True
     assert hands.llm.calls == 0, "grounding + acting must both be free for a clear target"
 
 
 def test_typing_extracts_the_payload_not_the_recipient(hands, instagram_elements):
-    step = PlanStep(description="send 'see you at 6' to Arundhati")
+    step = PlanStep(description="send 'see you at 6' to Alice")
     result = hands.execute(step, snapshot(instagram_elements))
     assert result["tool"] == "type_text"
     assert result["args"]["text"] == "see you at 6"
@@ -133,12 +133,12 @@ def test_off_target_click_is_flagged_not_celebrated(hands):
     failure the monolith's comments describe: it clicked a generic Instagram tab when asked for a
     specific person's chat, and auto-complete reported success."""
     elements = [el("Instagram Messages", "TabItemControl", 420, 80)]
-    step = PlanStep(description="open the chat of Arundhati", target="Arundhati")
+    step = PlanStep(description="open the chat of Alice", target="Alice")
     result = hands.execute(step, snapshot(elements))
 
     if result.get("matched_name"):
         assert result["on_target"] is False
-        assert "Arundhati" in result["correction"]
+        assert "Alice" in result["correction"]
         assert hands.scope_blocks == 1
 
 

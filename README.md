@@ -112,8 +112,8 @@ Most orders now resolve with **zero model calls at all**.
 <td width="50%" valign="top">
 
 ### 👁️ Screen Perception
-- Live UI-Automation tree walk (every named control + pixel coords)
-- Screenshot capture at 2 Hz
+- **Always watching** — continuous 2 Hz capture, streamed live to both UIs
+- Live UI-Automation tree (every named control + pixel coords)
 - Local vision model for icon-only / canvas UI
 - Grid-overlay coordinate grounding
 - Change detection via frame digest
@@ -394,7 +394,45 @@ sequenceDiagram
 
 ## 👁️ How JARVIS Sees
 
-Two perception paths, and choosing between them correctly is what makes JARVIS fast.
+JARVIS is **always watching** — but not always *thinking* about what it sees. Perception runs in
+three layers with very different costs, and using the cheapest one that can answer the question is
+what makes it fast.
+
+```mermaid
+flowchart TB
+    subgraph A["🔴  LAYER 1 — ALWAYS ON"]
+        direction LR
+        CAP["📸 Screen capture<br/><b>2 Hz, continuous</b><br/>~1 ms"] --> MIRROR["Live mirror in HUD<br/>+ dashboard"]
+        CAP --> DIGEST["16×16 frame digest<br/><i>did anything change?</i>"]
+    end
+
+    subgraph B["🟡  LAYER 2 — ON DEMAND, CACHED"]
+        TREE["🌳 UI Automation tree<br/>every named control + coords<br/><b>~630 ms</b> · re-walked only on change"]
+    end
+
+    subgraph C["🟢  LAYER 3 — LAST RESORT"]
+        VIS["🧠 gemma3:4b inference<br/>reads the actual pixels<br/><b>5–19 s</b>"]
+    end
+
+    DIGEST -->|"screen changed"| TREE
+    TREE -->|"no control matches"| VIS
+
+    style A fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style B fill:#78350f,stroke:#f59e0b,color:#fff
+    style C fill:#065f46,stroke:#10b981,color:#fff
+```
+
+| Layer | Runs | Cost | What it gives you |
+|:---|:---|:---|:---|
+| 📸 **Capture** | **Continuously, 2 Hz** | ~1 ms | Live screen mirror, change detection |
+| 🌳 **Accessibility tree** | On demand, cached | ~630 ms | Every control name + exact pixel coords |
+| 🧠 **Vision model** | Only when the tree fails | 5–19 s | Understanding of pixels the tree can't describe |
+
+> **Why not run the vision model continuously?** At 5–19 s per inference it would be ~40× slower
+> than the capture loop it's trying to keep up with. The screen is watched constantly; the *model*
+> is invoked when there's a question the accessibility tree genuinely can't answer.
+
+### Choosing between the tree and the model
 
 ```mermaid
 flowchart TD

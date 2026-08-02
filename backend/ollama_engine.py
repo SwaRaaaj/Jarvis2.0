@@ -292,9 +292,51 @@ class OllamaEngine:
         self.history: List[Dict[str, str]] = []
         self._stop_event = threading.Event()
 
+        # The multi-agent cortex replaces this class's single ReAct loop. The legacy loop below is
+        # kept intact and reachable via JARVIS_LEGACY_ENGINE=1 — it is the fallback if the agent
+        # layer can't be constructed (a missing dependency, say), so a bad import degrades to the
+        # old behaviour instead of taking the assistant offline.
+        self.cortex = None
+        self.use_cortex = os.environ.get("JARVIS_LEGACY_ENGINE", "").strip() not in ("1", "true", "yes")
+        if self.use_cortex:
+            try:
+                from agents.cortex import Cortex
+                from agents.base import LLMClient
+
+                self.cortex = Cortex(
+                    memory=memory_vault,
+                    vision=screen_vision,
+                    telemetry=PCTelemetry,
+                    os_api=OSAutomation,
+                    llm=LLMClient(api_key=GROQ_API_KEY),
+                    address=(memory_vault.get_user_info("user_name") or "Boss").split("/")[-1].strip() or "Boss",
+                )
+                self.history = self.cortex.history
+                threading.Thread(target=self._mine_history_async, daemon=True).start()
+            except Exception as e:
+                print(f"[Cortex init failed, using legacy engine]: {e}")
+                self.cortex = None
+                self.use_cortex = False
+
+    def _mine_history_async(self):
+        """Backfills SCHOLAR's rules from the existing execution log, off the startup path so a
+        large log can't delay the assistant coming online."""
+        try:
+            report = self.cortex.mine_history()
+            if report.get("promoted"):
+                print(f"[SCHOLAR] learned {report['promoted']} shortcuts from {report['scanned']} log entries")
+        except Exception as e:
+            print(f"[SCHOLAR mining skipped]: {e}")
+
     def cancel(self):
         """Requests the current in-flight task to stop before its next step (safety kill-switch)."""
         self._stop_event.set()
+        if self.cortex is not None:
+            self.cortex.cancel()
+
+    def agent_stats(self) -> Dict[str, Any]:
+        """Per-agent instrumentation for the dashboard; empty when running the legacy engine."""
+        return self.cortex.agent_stats() if self.cortex is not None else {}
 
     def _call_groq_chat(self, payload: Dict[str, Any], timeout: int = 30) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """POSTs to Groq's OpenAI-compatible /chat/completions with one short automatic retry, returning
@@ -798,10 +840,23 @@ class OllamaEngine:
     # ------------------------------------------------------------------
 
     def process_command(self, user_command: str, model_override: str = None) -> Generator[Dict[str, Any], None, None]:
-        """Processes a user command end-to-end. Tries the sub-second direct-match shortcut first for
-        simple single-step commands; otherwise runs a full observe -> think -> act loop against Groq,
-        using native tool-calling, re-perceiving the screen after every action, until the model calls
-        speak_final or the step budget runs out."""
+        """Processes a user command end-to-end.
+
+        Delegates to the multi-agent cortex (TRIAGE -> ARCHITECT -> ANCHOR -> HANDS/PATHFINDER ->
+        SENTINEL -> NARRATOR), falling back to the original single-loop engine below when the agent
+        layer is unavailable or JARVIS_LEGACY_ENGINE=1 is set.
+
+        The yielded event shapes are unchanged — {"type": "status"|"thought"|"tool_exec"|"response"}
+        — so every existing consumer keeps working. One new optional event, {"type": "detail"},
+        carries the long-form breakdown; consumers that don't know it simply ignore it.
+        """
+        if self.cortex is not None:
+            yield from self.cortex.run(user_command, model=model_override or self.preferred_model)
+            return
+        yield from self._process_command_legacy(user_command, model_override)
+
+    def _process_command_legacy(self, user_command: str, model_override: str = None) -> Generator[Dict[str, Any], None, None]:
+        """The original monolithic ReAct loop, retained as a fallback path."""
         self._stop_event.clear()
         start_time = time.time()
 

@@ -1,5 +1,25 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, CheckCircle2, AlertCircle, Wrench, Brain, User, MessageSquare } from 'lucide-react';
+import { Send, CheckCircle2, AlertCircle, Wrench, Brain, User, MessageSquare, ListChecks } from 'lucide-react';
+
+// Full class strings, never interpolated. Tailwind's compiler scans source text for complete class
+// names, so a constructed string like `bg-${tone}-950/30` produces no CSS at all.
+const TOOL_TONES = {
+  success: {
+    box: 'bg-emerald-950/30 border-emerald-500/30',
+    label: 'text-emerald-400',
+    badge: 'bg-emerald-900/60 text-emerald-300',
+  },
+  failed: {
+    box: 'bg-rose-950/30 border-rose-500/30',
+    label: 'text-rose-400',
+    badge: 'bg-rose-900/60 text-rose-300',
+  },
+  offTarget: {
+    box: 'bg-amber-950/30 border-amber-500/30',
+    label: 'text-amber-400',
+    badge: 'bg-amber-900/60 text-amber-300',
+  },
+};
 
 export default function ConsoleLogs({ logs, onSendCommand, isProcessing }) {
   const [inputText, setInputText] = useState('');
@@ -62,20 +82,57 @@ export default function ConsoleLogs({ logs, onSendCommand, isProcessing }) {
                 </div>
               )}
 
-              {log.type === 'tool_exec' && (
-                <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                      <Wrench size={14} />
-                      <span>PC Tool Executed: {log.tool}</span>
+              {log.type === 'tool_exec' && (() => {
+                // The status badge used to be hardcoded to SUCCESS, so a failed or misdirected
+                // action looked identical to a successful one.
+                const ok = log.output?.status === 'success';
+                const offTarget = log.output?.on_target === false;
+                const tone = TOOL_TONES[offTarget ? 'offTarget' : ok ? 'success' : 'failed'];
+                return (
+                  <div className={`${tone.box} border rounded-2xl p-4 space-y-2`}>
+                    <div className="flex items-center justify-between">
+                      <div className={`flex items-center gap-2 text-xs font-bold ${tone.label} uppercase tracking-wider`}>
+                        <Wrench size={14} />
+                        <span>PC Tool Executed: {log.tool}</span>
+                      </div>
+                      <span className={`text-[10px] font-mono ${tone.badge} px-2 py-0.5 rounded`}>
+                        {offTarget ? 'OFF-TARGET' : ok ? 'SUCCESS' : 'FAILED'}
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono bg-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded">SUCCESS</span>
+                    {log.output?.matched_name && (
+                      <div className="text-xs text-slate-300">
+                        <span className="text-slate-500">Hit:</span>{' '}
+                        <span className="text-cyan-300 font-medium">{log.output.matched_name}</span>
+                        {log.output?.grounding?.method && (
+                          <span className="text-slate-500"> (grounded via {log.output.grounding.method})</span>
+                        )}
+                      </div>
+                    )}
+                    {offTarget && (
+                      <p className="text-[11px] text-amber-300/90 leading-relaxed">{log.output.scope_reason}</p>
+                    )}
+                    <div className="text-xs font-mono text-slate-300 bg-slate-950/60 p-2.5 rounded-xl space-y-1">
+                      <div><span className="text-slate-500">Input:</span> <span className="text-cyan-300">{JSON.stringify(log.input)}</span></div>
+                      <div><span className="text-slate-500">Output:</span> <span className="text-slate-300">{JSON.stringify(log.output)}</span></div>
+                    </div>
                   </div>
-                  <div className="text-xs font-mono text-slate-300 bg-slate-950/60 p-2.5 rounded-xl space-y-1">
-                    <div><span className="text-slate-500">Input:</span> <span className="text-cyan-300">{JSON.stringify(log.input)}</span></div>
-                    <div><span className="text-slate-500">Output:</span> <span className="text-emerald-300">{JSON.stringify(log.output)}</span></div>
-                  </div>
-                </div>
+                );
+              })()}
+
+              {log.type === 'detail' && (
+                <details className="bg-slate-900/70 border border-slate-700/60 rounded-2xl p-4 group">
+                  <summary className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider cursor-pointer select-none">
+                    <ListChecks size={14} className="text-slate-400" />
+                    <span>Full Breakdown</span>
+                    {log.data?.steps_total != null && (
+                      <span className="ml-auto text-[10px] font-mono text-slate-400 normal-case">
+                        {log.data.steps_done}/{log.data.steps_total} steps &middot; {log.data.elapsed_seconds}s
+                        {log.data.stats?.llm_calls != null && ` · ${log.data.stats.llm_calls} model calls`}
+                      </span>
+                    )}
+                  </summary>
+                  <pre className="mt-3 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono overflow-x-auto">{log.text}</pre>
+                </details>
               )}
 
               {log.type === 'response' && (
@@ -83,6 +140,12 @@ export default function ConsoleLogs({ logs, onSendCommand, isProcessing }) {
                   <div className="flex items-center gap-2 text-xs font-bold text-cyan-300 uppercase tracking-wider">
                     <CheckCircle2 size={16} className="text-cyan-400" />
                     <span>JARVIS Response</span>
+                    {log.stats?.llm_calls != null && (
+                      <span className="ml-auto text-[10px] font-mono text-slate-500 normal-case">
+                        {log.stats.llm_calls} model calls &middot; {log.stats.tree_walks} screen scans
+                        {log.stats.walks_avoided > 0 && ` (${log.stats.walks_avoided} cached)`}
+                      </span>
+                    )}
                   </div>
                   <p className="text-sm font-medium text-slate-100 leading-relaxed">{log.text}</p>
                 </div>

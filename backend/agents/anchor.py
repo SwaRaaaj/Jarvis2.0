@@ -159,6 +159,11 @@ class Referent:
     """The parsed 'thing the order is about'."""
 
     text: str = ""
+    # The referent with its control-type noun left in. "Saved Tab Groups" is a real control name
+    # that merely contains the word "tab"; stripping it to "Saved Groups" and filtering the screen
+    # down to TabItems hides the very element being asked for. ground() falls back to this when the
+    # type-hinted interpretation finds nothing convincing.
+    full_text: str = ""
     ordinal: Optional[int] = None
     type_hint: str = ""
     is_anaphoric: bool = False
@@ -302,6 +307,7 @@ class AnchorAgent(Agent):
                     payload, body = body, ""
 
         body = self._strip_ordinal_words(body)
+        full_body = _strip_determiners(body)
         body = self._strip_type_nouns(body, type_hint, allow_empty=ordinal is not None or _only_type_noun(body, type_hint))
         body = _strip_determiners(body)
 
@@ -311,8 +317,8 @@ class AnchorAgent(Agent):
         if residual and all(t in _ANAPHORIC_TOKENS for t in residual):
             body, anaphoric_marker = "", True
 
-        return Referent(text=body, ordinal=ordinal, type_hint=type_hint, payload=payload,
-                        is_anaphoric=anaphoric_marker and not body, raw=raw)
+        return Referent(text=body, full_text=full_body, ordinal=ordinal, type_hint=type_hint,
+                        payload=payload, is_anaphoric=anaphoric_marker and not body, raw=raw)
 
     @staticmethod
     def _strip_type_nouns(text: str, type_hint: str, allow_empty: bool = False) -> str:
@@ -393,9 +399,12 @@ class AnchorAgent(Agent):
                 score += 0.06
             if referent.type_hint and referent.type_hint.lower() in e.type.lower():
                 score += 0.08
-            # A control occupying most of the screen is usually a container that merely *contains*
-            # the match, not the thing the user means to click.
-            if e.area > 0 and e.width > 1200 and e.height > 700:
+            # A screen-filling control is usually a container that merely *contains* the match
+            # rather than the thing to click. Scoped to non-interactive types: a large Pane or
+            # Window is structural, but a large Button or ListItem is a genuine target, and
+            # penalising those loses real matches like the pane named "Chrome Legacy Window" that a
+            # user can legitimately ask for by name.
+            if not e.is_interactive and e.area > 0 and e.width > 1200 and e.height > 700:
                 score -= 0.12
             scored.append((min(score, 1.0), e))
 
@@ -418,6 +427,24 @@ class AnchorAgent(Agent):
             return GroundedTarget(referent=label, method="none", reason="the order named no on-screen target")
 
         scored = self.score_candidates(referent, snapshot)
+
+        # Retry without the control-type interpretation when it found nothing convincing.
+        #
+        # A type noun inside a real control name ("Saved Tab Groups", "Chrome Legacy Window") gets
+        # read as a descriptor, which both strips it out of the target text and narrows the pool to
+        # that control type — hiding the exact element being asked for. Measured against a live
+        # Chrome window, this single case accounted for every grounding miss.
+        # Always scored, not just on low confidence: "click Chrome Legacy Window" reaches CONFIDENT
+        # on the *wrong* element (a button named "Chrome") once "window" has been stripped away, so
+        # a confidence gate would never fire. Comparing both readings and keeping the stronger one
+        # costs microseconds of pure string work and no model call.
+        if referent.type_hint and referent.full_text and referent.full_text != referent.text:
+            plain = Referent(text=referent.full_text, ordinal=referent.ordinal,
+                             payload=referent.payload, raw=referent.raw)
+            alt = self.score_candidates(plain, snapshot)
+            if alt and (not scored or alt[0][0] > scored[0][0]):
+                scored = alt
+                referent = plain
 
         # --- ordinal selection: "the 3rd profile" is positional, not a similarity question -------
         if referent.ordinal is not None:

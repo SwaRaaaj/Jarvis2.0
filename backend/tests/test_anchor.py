@@ -201,6 +201,40 @@ def test_vision_is_not_used_when_the_tree_already_matches(anchor, instagram_elem
     assert calls == [], "a confident tree match must not spend a vision call"
 
 
+@pytest.mark.parametrize("order,expected", [
+    ("click Saved Tab Groups", "Saved Tab Groups"),
+    ("click saved tab groups", "Saved Tab Groups"),
+    ("could you please click Saved Tab Groups", "Saved Tab Groups"),
+    ("click Chrome Legacy Window", "Chrome Legacy Window"),
+])
+def test_type_noun_inside_a_proper_name_is_not_a_control_hint(anchor, order, expected):
+    """Found by running against a live Chrome window: "Saved Tab Groups" is a Button whose name
+    merely contains "tab". Reading that as a control-type hint stripped it from the target text and
+    narrowed the pool to TabItems, hiding the exact element being asked for. This single case
+    accounted for every grounding miss in that run."""
+    snap = snapshot([
+        el("Saved Tab Groups", "ButtonControl", 200, 60),
+        el("Chrome Legacy Window", "PaneControl", 900, 500, w=1800, h=900),
+        el("New Tab", "TabItemControl", 400, 20),
+        el("Pull Request #1", "TabItemControl", 600, 20),
+        el("Chrome", "ButtonControl", 50, 20),
+    ])
+    target = anchor.ground_order(order, snap, allow_model=False)
+    assert target.resolved
+    assert target.element.name == expected
+
+
+def test_trailing_type_noun_still_works_as_a_hint(anchor):
+    """The fallback must not undo the ordinary case: "the Send button" should still prefer the
+    Button named Send over a list item that happens to share the word."""
+    snap = snapshot([
+        el("Send", "ListItemControl", 100, 400),
+        el("Send", "ButtonControl", 900, 800),
+    ])
+    target = anchor.ground_order("click the Send button", snap, allow_model=False)
+    assert target.element.type == "ButtonControl"
+
+
 def test_oversized_containers_are_penalised(anchor):
     snap = snapshot([
         el("Settings", "PaneControl", 960, 540, w=1900, h=1000),

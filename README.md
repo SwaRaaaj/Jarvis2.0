@@ -55,11 +55,11 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 ## 🎯 What Is This?
 
 Most "AI assistants" are text boxes that call APIs. JARVIS is different: it reads the **live Windows
-accessibility tree**, looks at **actual screenshots** with a **locally-run vision model**, and
+accessibility tree**, watches a **live video feed of your screen** through a **locally-run vision model**, and
 drives your **real mouse and keyboard**.
 
-> 🔒 **Your screen stays yours.** Screenshot understanding runs entirely on your machine via Ollama
-> (`gemma3:4b`). No image is ever uploaded. See [The Model Stack](#-the-model-stack).
+> 🔒 **Your screen stays yours.** The whole video feed is read on your machine via Ollama
+> (`gemma3:4b`). Not one frame is ever uploaded. See [The Model Stack](#-the-model-stack).
 
 Say *"open Instagram and message Alice"* and it will launch the inbox, visually locate that
 specific conversation among dozens, click it, and type — checking after every step that the screen
@@ -112,7 +112,7 @@ Most orders now resolve with **zero model calls at all**.
 <td width="50%" valign="top">
 
 ### 👁️ Screen Perception
-- **Always watching** — continuous 2 Hz capture, streamed live to both UIs
+- **Always watching** — continuous 2 Hz video feed, streamed live to both UIs
 - Live UI-Automation tree (every named control + pixel coords)
 - Local vision model for icon-only / canvas UI
 - Grid-overlay coordinate grounding
@@ -166,13 +166,13 @@ flowchart TB
     end
 
     subgraph Perception["👁️  Perception & Actuation"]
-        SV["ScreenVision<br/>UIA tree · mss capture"]
+        SV["ScreenVision<br/>UIA tree · live video feed"]
         OS["OSAutomation<br/>pyautogui · pywin32"]
         TEL["PCTelemetry<br/>psutil"]
     end
 
     subgraph Local["🖥️  LOCAL — Ollama on your machine"]
-        OLLAMA["gemma3:4b<br/><b>all screen understanding</b><br/>never leaves your PC"]
+        OLLAMA["gemma3:4b<br/><b>reads the live video feed</b><br/>never leaves your PC"]
     end
 
     subgraph Cloud["☁️  CLOUD — Groq"]
@@ -226,7 +226,7 @@ flowchart LR
         F["<b>llama-3.1-8b-instant</b><br/>routing · verification · phrasing"]
     end
 
-    PIX["📸 Your screenshots"] --> L
+    PIX["🎥 Your live screen feed<br/><i>continuous video, 2 Hz</i>"] --> L
     TXT["📝 Control names & orders<br/><i>text only</i>"] --> C
 
     style L fill:#065f46,stroke:#10b981,color:#fff
@@ -236,13 +236,13 @@ flowchart LR
 
 | | Runs where | Model | Does what |
 |:---|:---|:---|:---|
-| 👁️ **Vision** | 🖥️ **Local** — Ollama | `gemma3:4b` | Reads screenshots, answers *"what's on screen?"*, locates icon-only controls |
+| 👁️ **Vision** | 🖥️ **Local** — Ollama | `gemma3:4b` | Reads the live screen feed, answers *"what's on screen?"*, locates icon-only controls |
 | 🧠 **Planning** | ☁️ Cloud — Groq | `llama-3.3-70b-versatile` | Decomposes orders, picks tools |
 | ⚡ **Routing** | ☁️ Cloud — Groq | `llama-3.1-8b-instant` | Intent classification, disambiguation, verification |
 
 ### 🔒 Your screen never leaves your machine
 
-**No screenshot is ever uploaded anywhere.** Image data goes only to `localhost:11434`. Groq
+**No frame of your screen is ever uploaded anywhere.** The video feed goes only to `localhost:11434`. Groq
 receives text — control names pulled from the Windows accessibility tree, and your typed or spoken
 order. That's the whole reason vision is local.
 
@@ -255,7 +255,7 @@ both documented in the source:
    it inventing tools that didn't exist. The 70B model refuses to invent a tool natively — verified
    by prompting it to call a fake `banana_launcher` and watching it pick a real tool every time.
 2. **No local vision alternative on Groq.** Groq has no vision-capable model on this account, so
-   screenshot understanding *had* to stay on `gemma3:4b`. It never moved, and it never will need to.
+   screen understanding *had* to stay on `gemma3:4b`. It never moved, and it never will need to.
 
 The class is still named `OllamaEngine` — a fossil from when everything ran locally.
 
@@ -402,7 +402,7 @@ what makes it fast.
 flowchart TB
     subgraph A["🔴  LAYER 1 — ALWAYS ON"]
         direction LR
-        CAP["📸 Screen capture<br/><b>2 Hz, continuous</b><br/>~1 ms"] --> MIRROR["Live mirror in HUD<br/>+ dashboard"]
+        CAP["🎥 Live screen feed<br/><b>continuous video, 2 Hz</b><br/>~1 ms/frame"] --> MIRROR["Live mirror in HUD<br/>+ dashboard"]
         CAP --> DIGEST["16×16 frame digest<br/><i>did anything change?</i>"]
     end
 
@@ -424,7 +424,7 @@ flowchart TB
 
 | Layer | Runs | Cost | What it gives you |
 |:---|:---|:---|:---|
-| 📸 **Capture** | **Continuously, 2 Hz** | ~1 ms | Live screen mirror, change detection |
+| 🎥 **Live feed** | **Continuous video, 2 Hz** | ~1 ms/frame | Live screen mirror, change detection |
 | 🌳 **Accessibility tree** | On demand, cached | ~630 ms | Every control name + exact pixel coords |
 | 🧠 **Vision model** | Only when the tree fails | 5–19 s | Understanding of pixels the tree can't describe |
 
@@ -458,7 +458,7 @@ flowchart TD
 
 > **Why the grid trick?** Small vision models are unreliable at regressing raw pixel coordinates,
 > but they're good at *reading a printed label off an image*. So JARVIS draws a labelled grid
-> (`A1`, `B3`, `C10`…) over the screenshot, asks which cell contains the target, and maps that cell
+> (`A1`, `B3`, `C10`…) over a frame from the feed, asks which cell contains the target, and maps it
 > back to real screen pixels.
 
 **Measured on real hardware:** a UIA walk costs ~630 ms; a cached read costs ~0 ms; a vision call
@@ -504,11 +504,11 @@ A learned rule fires **without review**, so the bar to create one is deliberatel
 
 <table>
 <tr><th align="left">Layer</th><th align="left">Technology</th><th align="left">Purpose</th></tr>
-<tr><td><b>🖥️ Vision (local)</b></td><td>Ollama · <code>gemma3:4b</code></td><td><b>All screenshot understanding + coordinate grounding. Runs on your machine; images never leave it.</b></td></tr>
+<tr><td><b>🖥️ Vision (local)</b></td><td>Ollama · <code>gemma3:4b</code></td><td><b>Reads the live screen feed + grounds coordinates. Runs on your machine; no frame ever leaves it.</b></td></tr>
 <tr><td><b>☁️ Reasoning (cloud)</b></td><td>Groq · <code>llama-3.3-70b-versatile</code></td><td>Planning, tool selection <i>(text only)</i></td></tr>
 <tr><td></td><td>Groq · <code>llama-3.1-8b-instant</code></td><td>Classification, disambiguation, verification <i>(text only)</i></td></tr>
 <tr><td><b>Perception</b></td><td><code>uiautomation</code></td><td>Windows accessibility tree</td></tr>
-<tr><td></td><td><code>mss</code> + <code>Pillow</code></td><td>Fast screen capture</td></tr>
+<tr><td></td><td><code>mss</code> + <code>Pillow</code></td><td>Continuous screen capture — the 2 Hz video feed</td></tr>
 <tr><td></td><td><code>psutil</code></td><td>Hardware telemetry</td></tr>
 <tr><td><b>Actuation</b></td><td><code>pyautogui</code></td><td>Mouse & keyboard</td></tr>
 <tr><td></td><td><code>pywin32</code></td><td>Window management, foreground focus</td></tr>
@@ -624,8 +624,8 @@ ollama pull gemma3:4b     # ~3.3 GB, one-time download
 ollama serve              # keep this running
 ```
 
-This is JARVIS's **eyes** — every screenshot it understands goes through this model, entirely on
-your machine. Verify it's up:
+This is JARVIS's **eyes** — the entire live video feed of your screen is read by this model,
+entirely on your machine. Verify it's up:
 
 ```bash
 curl http://localhost:11434/api/tags
@@ -852,13 +852,13 @@ Being straight with you about what doesn't work yet:
 | 🧪 **No automated live-app tests** | The suite uses fakes for all OS actions. Real clicking on real apps is manually verified only |
 | 🎨 **Dashboard styling is partial** | The JSX uses Tailwind-style class names, but Tailwind isn't installed — only the custom classes in `index.css` actually apply |
 | 🌐 **STT needs internet** | Speech recognition uses Google's API |
-| 📈 **Vision accuracy unmeasured** | No labelled screenshot benchmark exists yet |
+| 📈 **Vision accuracy unmeasured** | No labelled screen-frame benchmark exists yet |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Labelled screenshot benchmark for vision accuracy
+- [ ] Labelled screen-frame benchmark for vision accuracy
 - [ ] Replace `locate_via_vision` grid trick with a proper grounding model
 - [ ] Offline/local STT (Whisper) to drop the internet dependency
 - [ ] Install Tailwind properly, or convert the dashboard to pure custom CSS

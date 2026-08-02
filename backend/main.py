@@ -61,6 +61,11 @@ def get_live_metrics():
 def get_models():
     return {"models": ollama.list_local_models()}
 
+@app.get("/api/agents")
+def get_agent_stats():
+    """Per-agent instrumentation: model calls, cache hit rates, grounding methods, learned rules."""
+    return {"engine": "cortex" if ollama.cortex is not None else "legacy", "agents": ollama.agent_stats()}
+
 @app.get("/api/memory")
 def get_memory():
     return {

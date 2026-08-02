@@ -82,9 +82,13 @@ export default function App() {
             setLogs((prev) => [...prev, { type: 'thought', text: data.text }]);
           } else if (data.type === 'tool_exec') {
             setLogs((prev) => [...prev, { type: 'tool_exec', tool: data.tool, input: data.input, output: data.output }]);
+          } else if (data.type === 'detail') {
+            // NARRATOR's long-form register: the plan, what was actually clicked, the evidence.
+            // Shown here but never spoken — speech gets the short version below.
+            setLogs((prev) => [...prev, { type: 'detail', text: data.text, data: data.data }]);
           } else if (data.type === 'response') {
             setIsProcessing(false);
-            setLogs((prev) => [...prev, { type: 'response', text: data.text }]);
+            setLogs((prev) => [...prev, { type: 'response', text: data.text, stats: data.stats }]);
             // Trigger browser voice synthesis out loud!
             speakInBrowser(data.text);
           } else if (data.type === 'error') {

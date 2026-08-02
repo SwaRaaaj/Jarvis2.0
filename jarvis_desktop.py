@@ -41,6 +41,14 @@ class JarvisDesktopApp:
         self.voice = VoiceEngine()
         self.ollama = OllamaEngine(memory_vault=self.memory, screen_vision=self.vision)
 
+        # Voice gate. Shares the cortex's instance when available so its stats show up alongside
+        # the other agents; falls back to a standalone gate under the legacy engine.
+        if getattr(self.ollama, "cortex", None) is not None:
+            self.ears = self.ollama.cortex.ears
+        else:
+            from agents.ears import EarsAgent
+            self.ears = EarsAgent()
+
         self.is_listening = False
         self.is_continuous = True
         self.is_processing = False
@@ -276,7 +284,17 @@ class JarvisDesktopApp:
                 elif ev_type == "thought":
                     self.root.after(0, self.append_log, f"THOUGHT: {event.get('text')}")
                 elif ev_type == "tool_exec":
-                    self.root.after(0, self.append_log, f"TOOL: {event.get('tool')} -> {event.get('output')}")
+                    out = event.get("output") or {}
+                    summary = out.get("status", "?")
+                    if out.get("matched_name"):
+                        summary += f" -> '{out['matched_name']}'"
+                    if out.get("on_target") is False:
+                        summary += "  [OFF-TARGET]"
+                    self.root.after(0, self.append_log, f"TOOL: {event.get('tool')} {summary}")
+                elif ev_type == "detail":
+                    # The long-form breakdown: the plan, what was actually clicked, the evidence.
+                    # Shown in the console but never spoken — see NARRATOR's two registers.
+                    self.root.after(0, self.append_log, f"\n--- DETAIL ---\n{event.get('text', '')}\n")
                 elif ev_type == "response":
                     resp = event.get("text", "")
                     self.root.after(0, self.append_log, f"JARVIS: {resp}")
@@ -325,13 +343,28 @@ class JarvisDesktopApp:
                 if self.is_continuous and not self.is_processing and not self.voice.is_speaking:
                     try:
                         with sr.Microphone() as source:
-                            r.adjust_for_ambient_noise(source, duration=0.3)
+                            # Ambient noise is stable for minutes; the original code re-measured it
+                            # on every iteration, blocking the mic for 0.3s each time for nothing.
+                            if self.ears.calibration_due():
+                                r.adjust_for_ambient_noise(source, duration=0.3)
+                                self.ears.note_calibration()
                             self.root.after(0, self.transcript_lbl.config, {"text": "🎙️ Listening..."})
                             audio = r.listen(source, timeout=4, phrase_time_limit=8)
                             text = r.recognize_google(audio)
-                            if text.strip():
-                                self.root.after(0, self.transcript_lbl.config, {"text": f'"{text}"'})
-                                self.send_command(text)
+                            if not text.strip():
+                                continue
+
+                            # EARS decides whether this was aimed at JARVIS at all. Without it every
+                            # transcribed utterance — including nearby conversation — became a real
+                            # desktop action.
+                            decision = self.ears.gate(text)
+                            if not decision.dispatch:
+                                self.root.after(0, self.transcript_lbl.config,
+                                                {"text": f'(ignored: {decision.reason})'})
+                                continue
+
+                            self.root.after(0, self.transcript_lbl.config, {"text": f'"{text}"'})
+                            self.send_command(decision.cleaned or text)
                     except Exception:
                         pass
                 time.sleep(0.5)

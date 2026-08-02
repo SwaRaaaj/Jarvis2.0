@@ -45,15 +45,15 @@ INBOX = [
     el("Messages", "TabItemControl", 300, 80),
     el("Instagram Messages", "TabItemControl", 420, 80),
     el("Search", "EditControl", 300, 130),
-    el("Arundhati Sharma", "ListItemControl", 300, 220),
-    el("Arun Kumar", "ListItemControl", 300, 280),
-    el("Rahul Mehta", "ListItemControl", 300, 340),
+    el("Alice Johnson", "ListItemControl", 300, 220),
+    el("Alicia Jones", "ListItemControl", 300, 280),
+    el("Bob Miller", "ListItemControl", 300, 340),
     el("Message...", "EditControl", 700, 800),
     el("Send", "ButtonControl", 900, 800),
 ]
 
 LONG_LIST = [el(f"Conversation {i}", "ListItemControl", 300, 100 + i * 30) for i in range(30)] + [
-    el("Arundhati Sharma", "ListItemControl", 300, 1000),
+    el("Alice Johnson", "ListItemControl", 300, 1000),
 ]
 
 VSCODE = [
@@ -67,9 +67,9 @@ VSCODE = [
 
 CASES = [
     # --- the documented failure: a named person vs a generic tab -------------------
-    ("named person over generic tab", "open the chat of Arundhati", INBOX, "Arundhati Sharma"),
-    ("same, lowercase (voice input)", "open the chat of arundhati", INBOX, "Arundhati Sharma"),
-    ("possessive form", "open Arundhati's chat", INBOX, "Arundhati Sharma"),
+    ("named person over generic tab", "open the chat of Alice", INBOX, "Alice Johnson"),
+    ("same, lowercase (voice input)", "open the chat of alice", INBOX, "Alice Johnson"),
+    ("possessive form", "open Alice's chat", INBOX, "Alice Johnson"),
 
     # --- simple cases the old code should also get right ---------------------------
     ("exact button name", "click Send", INBOX, "Send"),
@@ -77,7 +77,7 @@ CASES = [
     ("exact file name", "open main.py", VSCODE, "main.py"),
 
     # --- truncation: target beyond the 25-element observation window ---------------
-    ("target below the fold", "open the chat of Arundhati", LONG_LIST, "Arundhati Sharma"),
+    ("target below the fold", "open the chat of Alice", LONG_LIST, "Alice Johnson"),
 
     # --- wake-word contamination (this repo's folder is named "jarvis") ------------
     ("wake word must not match window", "jarvis open main.py", VSCODE, "main.py"),
@@ -86,14 +86,14 @@ CASES = [
     ("ordinal reference", "open the 2nd conversation", LONG_LIST, "Conversation 1"),
 
     # --- content vs recipient ------------------------------------------------------
-    ("quoted content is not the target", "send 'Arun Kumar' to Rahul", INBOX, "Rahul Mehta"),
+    ("quoted content is not the target", "send 'Alicia Jones' to Bob", INBOX, "Bob Miller"),
 
     # --- must refuse rather than blind-click --------------------------------------
     ("absent target must refuse", "click the Publish button", VSCODE, None),
-    ("absent person must refuse", "open the chat of Priyanka", INBOX, None),
+    ("absent person must refuse", "open the chat of Zara", INBOX, None),
 
     # --- prefix / partial names ----------------------------------------------------
-    ("partial first name", "open the chat of Rahul", INBOX, "Rahul Mehta"),
+    ("partial first name", "open the chat of Bob", INBOX, "Bob Miller"),
     ("target named mid-sentence", "can you open main.py for me", VSCODE, "main.py"),
 
     # --- interrogative phrasing must not become a click ---------------------------
@@ -103,8 +103,8 @@ CASES = [
     ("tab vs button of same name", "click the Search button", VSCODE, "Search"),
 
     # --- below-the-fold variants ---------------------------------------------------
-    ("below fold, exact name", "click Arundhati Sharma", LONG_LIST, "Arundhati Sharma"),
-    ("below fold, partial name", "open Arundhati", LONG_LIST, "Arundhati Sharma"),
+    ("below fold, exact name", "click Alice Johnson", LONG_LIST, "Alice Johnson"),
+    ("below fold, partial name", "open Alice", LONG_LIST, "Alice Johnson"),
 
     # --- polite / indirect phrasing ------------------------------------------------
     ("polite phrasing", "could you please open ollama_engine.py", VSCODE, "ollama_engine.py"),

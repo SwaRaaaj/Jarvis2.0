@@ -138,7 +138,7 @@ def architect():
 
 
 def test_rule_plan_splits_on_real_connectives(architect):
-    plan = architect.rule_plan("open instagram then find arundhati and then send her a message")
+    plan = architect.rule_plan("open instagram then find alice and then send her a message")
     assert len(plan.steps) == 3
     assert plan.steps[0].lane == "pathfinder"
     assert plan.source == "rule"
@@ -158,14 +158,14 @@ def test_model_plan_is_parsed_into_verifiable_steps():
     llm = FakeLLM(lambda p: """{"steps": [
         {"description": "Open the Instagram inbox", "target": "instagram", "lane": "pathfinder",
          "success_criteria": "the Instagram direct inbox is on screen"},
-        {"description": "Open the conversation with Arundhati", "target": "Arundhati", "lane": "hands",
-         "success_criteria": "the conversation with Arundhati is open"}
+        {"description": "Open the conversation with Alice", "target": "Alice", "lane": "hands",
+         "success_criteria": "the conversation with Alice is open"}
     ]}""")
-    plan = ArchitectAgent(llm).plan("message arundhati on instagram")
+    plan = ArchitectAgent(llm).plan("message alice on instagram")
 
     assert len(plan.steps) == 2
     assert plan.source == "model"
-    assert plan.steps[1].target == "Arundhati"
+    assert plan.steps[1].target == "Alice"
     assert plan.steps[1].success_criteria
     assert llm.calls == 1
 

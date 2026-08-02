@@ -13,7 +13,7 @@ from conftest import FakeLLM, FakeTelemetry, FakeVision, el
 def retina():
     vision = FakeVision([
         el("Send", "ButtonControl", 900, 800),
-        el("Arundhati Sharma", "ListItemControl", 300, 220),
+        el("Alice Johnson", "ListItemControl", 300, 220),
         el("Search", "EditControl", 300, 130),
     ])
     return RetinaAgent(vision=vision, telemetry=FakeTelemetry("Instagram"), llm=FakeLLM())
@@ -73,11 +73,11 @@ def test_observation_is_ranked_by_the_query():
     """The old renderer sorted by screen position and cut at [:25]. Here the caller's query decides
     which elements survive a tight budget, so the relevant one is always shown."""
     filler = [el(f"Item {i}", "ListItemControl", 100, i * 20) for i in range(40)]
-    target = el("Arundhati Sharma", "ListItemControl", 100, 2000)
+    target = el("Alice Johnson", "ListItemControl", 100, 2000)
     retina = RetinaAgent(vision=FakeVision(filler + [target]), telemetry=FakeTelemetry(), llm=FakeLLM())
 
-    observation = retina.observation(query="open the chat of Arundhati", budget=5)
-    assert "Arundhati Sharma" in observation
+    observation = retina.observation(query="open the chat of Alice", budget=5)
+    assert "Alice Johnson" in observation
     assert "+36 more elements" in observation
 
 

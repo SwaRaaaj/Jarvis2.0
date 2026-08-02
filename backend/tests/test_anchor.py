@@ -22,7 +22,7 @@ def anchor():
 
 
 @pytest.mark.parametrize("order,expected_text,expected_type,expected_ordinal", [
-    ("open the chat of Arundhati", "arundhati", "ListItem", None),
+    ("open the chat of Alice", "alice", "ListItem", None),
     ("click the Send button", "send", "Button", None),
     ("play the 3rd video", "", "ListItem", 3),
     ("open instagram", "instagram", "", None),
@@ -68,8 +68,8 @@ def test_quoted_span_is_the_target_for_clicking_verbs(anchor):
 
 
 def test_recipient_and_content_split_without_quotes(anchor):
-    ref = anchor.extract_referent("message Arundhati saying hey are you free")
-    assert ref.text == "Arundhati"
+    ref = anchor.extract_referent("message Alice saying hey are you free")
+    assert ref.text == "Alice"
     assert ref.payload == "hey are you free"
 
 
@@ -79,7 +79,7 @@ def test_recipient_and_content_split_without_quotes(anchor):
     "do you see the Send button",
     "where is main.py",
     "can you see my screen",
-    "is that Arundhati?",
+    "is that Alice?",
 ])
 def test_questions_never_become_clicks(anchor, question, instagram_elements):
     """Found by the old-vs-new benchmark: ANCHOR happily grounded "is Send visible on screen" to
@@ -115,8 +115,8 @@ def test_do_it_again_is_imperative_not_interrogative(anchor):
 def test_lowercase_names_are_found(anchor):
     """The old `_extract_named_target` regex was `\\b[A-Z][a-z]{2,}\\b`, so it found nothing at all
     in lowercase voice transcription — which is what a microphone actually produces."""
-    ref = anchor.extract_referent("open the chat of arundhati")
-    assert ref.text == "arundhati"
+    ref = anchor.extract_referent("open the chat of alice")
+    assert ref.text == "alice"
 
 
 # ======================================================================
@@ -126,9 +126,9 @@ def test_lowercase_names_are_found(anchor):
 
 def test_grounds_exact_name_without_a_model_call(anchor, instagram_elements):
     snap = snapshot(instagram_elements)
-    target = anchor.ground_order("open the chat of Arundhati", snap)
+    target = anchor.ground_order("open the chat of Alice", snap)
     assert target.resolved
-    assert target.element.name == "Arundhati Sharma"
+    assert target.element.name == "Alice Johnson"
     assert target.confidence >= CONFIDENT
     assert anchor.llm.calls == 0, "an unambiguous name must never cost a model call"
 
@@ -137,8 +137,8 @@ def test_prefers_the_named_row_over_a_generic_tab(anchor, instagram_elements):
     """The documented monolith failure: told to open a specific person's chat, it clicked the
     generic "Instagram Messages" tab because that was a plausible first step."""
     snap = snapshot(instagram_elements)
-    target = anchor.ground_order("open the chat of Arundhati", snap)
-    assert target.element.name == "Arundhati Sharma"
+    target = anchor.ground_order("open the chat of Alice", snap)
+    assert target.element.name == "Alice Johnson"
     assert "Messages" not in target.element.name
 
 
@@ -146,13 +146,13 @@ def test_full_element_list_is_searched_not_just_the_first_25(anchor):
     """The old observation builder sorted by screen position and truncated to [:25], so an element
     further down was invisible to the model and grounding failed for reasons prompting can't fix."""
     filler = [el(f"Item {i}", "ListItemControl", 100, 100 + i * 20) for i in range(40)]
-    target_row = el("Arundhati Sharma", "ListItemControl", 100, 1000)
+    target_row = el("Alice Johnson", "ListItemControl", 100, 1000)
     snap = snapshot(filler + [target_row])
     assert len(snap.elements) == 41
 
-    target = anchor.ground_order("open the chat of Arundhati", snap)
+    target = anchor.ground_order("open the chat of Alice", snap)
     assert target.resolved
-    assert target.element.name == "Arundhati Sharma"
+    assert target.element.name == "Alice Johnson"
 
 
 def test_ordinal_selection_uses_reading_order(anchor):
@@ -171,10 +171,10 @@ def test_ambiguous_candidates_escalate_to_one_cheap_model_call(instagram_element
     llm = FakeLLM(lambda payload: '{"choice": 2, "confidence": 0.8}')
     anchor = AnchorAgent(llm)
     snap = snapshot([
-        el("Arun Kumar", "ListItemControl", 100, 100),
-        el("Arun Kumaran", "ListItemControl", 100, 140),
+        el("Alicia Jones", "ListItemControl", 100, 100),
+        el("Alicia Jonas", "ListItemControl", 100, 140),
     ])
-    target = anchor.ground_order("open the chat of Arun", snap)
+    target = anchor.ground_order("open the chat of Alicia", snap)
     assert target.resolved
     assert llm.calls == 1, "ambiguity costs exactly one call"
     assert llm.payloads[0]["model"] == "llama-3.1-8b-instant", "and it uses the cheap model"
@@ -250,16 +250,16 @@ def test_oversized_containers_are_penalised(anchor):
 
 
 def test_scope_guard_rejects_a_successful_but_misdirected_click(anchor):
-    ref = anchor.extract_referent("open the chat of Arundhati")
+    ref = anchor.extract_referent("open the chat of Alice")
     result = {"status": "success", "matched_name": "Instagram Messages"}
     ok, reason = anchor.verify_on_target(ref, result)
     assert ok is False
-    assert "Arundhati" in reason
+    assert "Alice" in reason
 
 
 def test_scope_guard_accepts_the_right_target(anchor):
-    ref = anchor.extract_referent("open the chat of Arundhati")
-    ok, _ = anchor.verify_on_target(ref, {"status": "success", "matched_name": "Arundhati Sharma"})
+    ref = anchor.extract_referent("open the chat of Alice")
+    ok, _ = anchor.verify_on_target(ref, {"status": "success", "matched_name": "Alice Johnson"})
     assert ok is True
 
 
@@ -278,11 +278,11 @@ def test_scope_guard_defers_when_no_name_was_reported(anchor):
 
 
 def test_scope_report_gives_an_actionable_correction(anchor):
-    ref = anchor.extract_referent("open the chat of Arundhati")
-    report = anchor.scope_report("open the chat of Arundhati", ref,
+    ref = anchor.extract_referent("open the chat of Alice")
+    report = anchor.scope_report("open the chat of Alice", ref,
                                  {"status": "success", "matched_name": "Instagram Messages"})
     assert "SCOPE WARNING" in report
-    assert "Arundhati" in report
+    assert "Alice" in report
     assert "Do not report this as done" in report
 
 
@@ -292,11 +292,11 @@ def test_scope_report_gives_an_actionable_correction(anchor):
 
 
 def test_anaphora_resolves_from_history(anchor, instagram_elements):
-    history = [{"user": "open the chat of Arundhati", "bot": "Clicked 'Arundhati Sharma' for you, Boss."}]
+    history = [{"user": "open the chat of Alice", "bot": "Clicked 'Alice Johnson' for you, Boss."}]
     snap = snapshot(instagram_elements)
     target = anchor.ground_order("do it again", snap, history=history, allow_model=False)
     assert target.resolved
-    assert target.element.name == "Arundhati Sharma"
+    assert target.element.name == "Alice Johnson"
 
 
 def test_no_history_means_no_blind_click(anchor, instagram_elements):

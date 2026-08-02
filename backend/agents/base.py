@@ -157,7 +157,7 @@ class ScreenSnapshot:
         *relevance to the query* rather than by raw screen position.
 
         This is the fix for the monolith's `sorted(...)[:25]`: if the user said "open the chat of
-        Arundhati" and Arundhati's row was the 40th element in reading order, the old renderer
+        Alice" and Alice's row was the 40th element in reading order, the old renderer
         simply never showed it to the model, which then reported that no such element existed.
         """
         ranked = rank_elements(self.elements, query)[:budget]

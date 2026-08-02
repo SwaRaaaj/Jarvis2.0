@@ -105,15 +105,15 @@ def test_compound_orders_are_never_promoted_as_a_single_action(scholar, memory):
 
 
 def test_multi_tool_orders_are_never_promoted_even_without_connectives(scholar, memory):
-    """"message arundhati on instagram" has no "then" but still takes two distinct actions."""
+    """"message alice on instagram" has no "then" but still takes two distinct actions."""
     for _ in range(5):
-        memory.log_action("message arundhati on instagram", "", "open_social_inbox",
+        memory.log_action("message alice on instagram", "", "open_social_inbox",
                           '{"platform": "instagram"}', "ok", "success")
-        memory.log_action("message arundhati on instagram", "", "click_coordinate",
+        memory.log_action("message alice on instagram", "", "click_coordinate",
                           '{"x": 300, "y": 220}', "ok", "success")
 
     scholar.mine()
-    assert scholar.lookup("message arundhati on instagram") is None
+    assert scholar.lookup("message alice on instagram") is None
 
 
 def test_single_action_orders_are_still_promoted(scholar, memory):

@@ -2,7 +2,7 @@
 
 The old engine did no planning at all. It decided one action at a time, and sized its step budget
 with `clauses * 2 + 2` where `clauses` came from splitting on commas and the literal words "then"
-and "next". An order phrased any other way ("go to instagram and message arundhati hey") counted as
+and "next". An order phrased any other way ("go to instagram and message alice hey") counted as
 one clause and got a 4-step budget for a job that needs five actions.
 
 Worse, with no plan there was nothing to check completion *against*. The monolith asked a 70B model

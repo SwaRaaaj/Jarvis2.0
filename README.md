@@ -19,6 +19,7 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 
 <br>
 
+![Local Vision](https://img.shields.io/badge/vision-100%25_local-10b981?style=flat-square)
 ![Agents](https://img.shields.io/badge/agents-11-06b6d4?style=flat-square)
 ![Tests](https://img.shields.io/badge/tests-229_passing-10b981?style=flat-square)
 ![Grounding](https://img.shields.io/badge/grounding_accuracy-100%25-10b981?style=flat-square)
@@ -33,6 +34,7 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 - [What Is This?](#-what-is-this)
 - [Capabilities](#-capabilities)
 - [System Architecture](#-system-architecture)
+- [The Model Stack](#-the-model-stack)
 - [The Agent Cortex](#-the-agent-cortex)
 - [How an Order Flows](#-how-an-order-flows)
 - [How JARVIS Sees](#-how-jarvis-sees)
@@ -53,25 +55,29 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 ## 🎯 What Is This?
 
 Most "AI assistants" are text boxes that call APIs. JARVIS is different: it reads the **live Windows
-accessibility tree**, looks at **actual screenshots**, and drives your **real mouse and keyboard**.
+accessibility tree**, looks at **actual screenshots** with a **locally-run vision model**, and
+drives your **real mouse and keyboard**.
 
-Say *"open Instagram and message Arundhati"* and it will launch the inbox, visually locate that
+> 🔒 **Your screen stays yours.** Screenshot understanding runs entirely on your machine via Ollama
+> (`gemma3:4b`). No image is ever uploaded. See [The Model Stack](#-the-model-stack).
+
+Say *"open Instagram and message Alice"* and it will launch the inbox, visually locate that
 specific conversation among dozens, click it, and type — checking after every step that the screen
 actually changed the way it expected.
 
 ```
 ┌─ You ──────────────────────────────────────────────────────────┐
-│  "open the chat of Arundhati"                                  │
+│  "open the chat of Alice"                                      │
 └────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─ JARVIS ───────────────────────────────────────────────────────┐
 │  Intent: multi_step (via rule)                        0 calls  │
 │  Plan: 1. Open the Instagram inbox                             │
-│        2. Open the conversation with Arundhati                 │
-│  ANCHOR: "Arundhati" → 'Arundhati Sharma' (exact, 1.00)        │
+│        2. Open the conversation with Alice                     │
+│  ANCHOR: "Alice" → 'Alice Johnson' (exact, 1.00)               │
 │  HANDS:  click (300, 220)                                      │
-│  SENTINEL: verified — 'Arundhati Sharma' now visible on screen │
-│  → "Opened the chat with Arundhati Sharma, Boss."              │
+│  SENTINEL: verified — 'Alice Johnson' is now on screen         │
+│  → "Opened the chat with Alice Johnson, Boss."                 │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -165,9 +171,12 @@ flowchart TB
         TEL["PCTelemetry<br/>psutil"]
     end
 
-    subgraph Models["🤖  Models"]
-        GROQ["Groq Cloud<br/>llama-3.3-70b · llama-3.1-8b"]
-        OLLAMA["Ollama local<br/>gemma3:4b vision"]
+    subgraph Local["🖥️  LOCAL — Ollama on your machine"]
+        OLLAMA["gemma3:4b<br/><b>all screen understanding</b><br/>never leaves your PC"]
+    end
+
+    subgraph Cloud["☁️  CLOUD — Groq"]
+        GROQ["llama-3.3-70b · llama-3.1-8b<br/>text reasoning only<br/>never sees your screen"]
     end
 
     subgraph Storage["💾  Storage"]
@@ -188,9 +197,74 @@ flowchart TB
 
     style Brain fill:#0e7490,stroke:#06b6d4,color:#fff
     style Interfaces fill:#1e293b,stroke:#475569,color:#fff
-    style Models fill:#4c1d95,stroke:#8b5cf6,color:#fff
-    style Perception fill:#065f46,stroke:#10b981,color:#fff
+    style Local fill:#065f46,stroke:#10b981,color:#fff
+    style Cloud fill:#4c1d95,stroke:#8b5cf6,color:#fff
+    style Perception fill:#1e3a5f,stroke:#3b82f6,color:#fff
 ```
+
+---
+
+## 🤖 The Model Stack
+
+JARVIS is **hybrid by design**: everything that touches your screen runs **locally**, and only
+plain text ever leaves your machine.
+
+```mermaid
+flowchart LR
+    subgraph L["🖥️  LOCAL — Ollama"]
+        direction TB
+        G["<b>gemma3:4b</b><br/>~3.3 GB"]
+        G1["ask_vision<br/><i>“what's on screen?”</i>"]
+        G2["locate_via_vision<br/><i>grid-grounded coordinates</i>"]
+        G --> G1
+        G --> G2
+    end
+
+    subgraph C["☁️  CLOUD — Groq"]
+        direction TB
+        S["<b>llama-3.3-70b-versatile</b><br/>planning · tool selection"]
+        F["<b>llama-3.1-8b-instant</b><br/>routing · verification · phrasing"]
+    end
+
+    PIX["📸 Your screenshots"] --> L
+    TXT["📝 Control names & orders<br/><i>text only</i>"] --> C
+
+    style L fill:#065f46,stroke:#10b981,color:#fff
+    style C fill:#4c1d95,stroke:#8b5cf6,color:#fff
+    style PIX fill:#7f1d1d,stroke:#ef4444,color:#fff
+```
+
+| | Runs where | Model | Does what |
+|:---|:---|:---|:---|
+| 👁️ **Vision** | 🖥️ **Local** — Ollama | `gemma3:4b` | Reads screenshots, answers *"what's on screen?"*, locates icon-only controls |
+| 🧠 **Planning** | ☁️ Cloud — Groq | `llama-3.3-70b-versatile` | Decomposes orders, picks tools |
+| ⚡ **Routing** | ☁️ Cloud — Groq | `llama-3.1-8b-instant` | Intent classification, disambiguation, verification |
+
+### 🔒 Your screen never leaves your machine
+
+**No screenshot is ever uploaded anywhere.** Image data goes only to `localhost:11434`. Groq
+receives text — control names pulled from the Windows accessibility tree, and your typed or spoken
+order. That's the whole reason vision is local.
+
+### Why the split?
+
+This project **started fully local** and moved reasoning to the cloud for two concrete reasons,
+both documented in the source:
+
+1. **Tool-calling reliability.** The local 3B model needed JSON-schema-constrained decoding to stop
+   it inventing tools that didn't exist. The 70B model refuses to invent a tool natively — verified
+   by prompting it to call a fake `banana_launcher` and watching it pick a real tool every time.
+2. **No local vision alternative on Groq.** Groq has no vision-capable model on this account, so
+   screenshot understanding *had* to stay on `gemma3:4b`. It never moved, and it never will need to.
+
+The class is still named `OllamaEngine` — a fossil from when everything ran locally.
+
+> 💡 **Want it fully offline?** The architecture supports it: swap `FAST_MODEL` / `SMART_MODEL` in
+> [`agents/base.py`](backend/agents/base.py) and point `LLMClient` at Ollama's OpenAI-compatible
+> endpoint. Expect weaker tool-calling — that's the tradeoff that caused the original migration.
+
+> ⚠️ **`qwen2.5-coder:3b`** is present in some local Ollama installs for this project but is
+> **not referenced anywhere in the code**. Safe to remove unless you're using it separately.
 
 ---
 
@@ -220,7 +294,7 @@ The most important agent. It answers three questions:
 
 ```
 1. WHAT DID THE ORDER NAME?
-   "open the chat of Arundhati"  →  referent: "Arundhati" (ListItem)
+   "open the chat of Alice"  →  referent: "Alice" (ListItem)
    "send 'hello' to Bob"         →  target: "Bob",  payload: "hello"
    "play the 3rd video"          →  ordinal: 3,    type: ListItem
 
@@ -232,7 +306,7 @@ The most important agent. It answers three questions:
 
 3. DID WE ACTUALLY HIT IT?
    click succeeded + matched 'Instagram Messages'
-   but the order said "Arundhati"  →  ❌ OFF-TARGET, not progress
+   but the order said "Alice"  →  ❌ OFF-TARGET, not progress
 ```
 
 That third check is the one that matters most. A click that succeeds on the wrong element is
@@ -278,7 +352,7 @@ sequenceDiagram
     participant S as 🛡️ SENTINEL
     participant N as 🗣️ NARRATOR
 
-    U->>E: "open the chat of Arundhati"
+    U->>E: "open the chat of Alice"
     E->>E: addressed to JARVIS? not filler? not a duplicate?
     E->>T: dispatch
 
@@ -286,12 +360,12 @@ sequenceDiagram
     T->>A: kind = multi_step
 
     A->>A: decompose into a checklist
-    Note over A: 1. Open the Instagram inbox<br/>2. Open the conversation with Arundhati
+    Note over A: 1. Open the Instagram inbox<br/>2. Open the conversation with Alice
 
     loop for each step
         R->>R: snapshot (re-walks tree only if screen changed)
         AN->>AN: bind step target → real element
-        Note over AN: "Arundhati" → 'Arundhati Sharma' @ (300,220)
+        Note over AN: "Alice" → 'Alice Johnson' @ (300,220)
         H->>H: perform exactly one action
         AN->>AN: 🛡️ scope guard — did we hit what was named?
         S->>S: verify from screen evidence
@@ -302,7 +376,7 @@ sequenceDiagram
         end
     end
 
-    N->>U: 🔊 "Opened the chat with Arundhati Sharma, Boss."
+    N->>U: 🔊 "Opened the chat with Alice Johnson, Boss."
     N->>U: 📋 full breakdown → console
 ```
 
@@ -392,9 +466,9 @@ A learned rule fires **without review**, so the bar to create one is deliberatel
 
 <table>
 <tr><th align="left">Layer</th><th align="left">Technology</th><th align="left">Purpose</th></tr>
-<tr><td><b>Reasoning</b></td><td>Groq · <code>llama-3.3-70b-versatile</code></td><td>Planning, tool selection</td></tr>
-<tr><td></td><td>Groq · <code>llama-3.1-8b-instant</code></td><td>Classification, disambiguation, verification</td></tr>
-<tr><td><b>Vision</b></td><td>Ollama · <code>gemma3:4b</code> (local)</td><td>Screenshot understanding, coordinate grounding</td></tr>
+<tr><td><b>🖥️ Vision (local)</b></td><td>Ollama · <code>gemma3:4b</code></td><td><b>All screenshot understanding + coordinate grounding. Runs on your machine; images never leave it.</b></td></tr>
+<tr><td><b>☁️ Reasoning (cloud)</b></td><td>Groq · <code>llama-3.3-70b-versatile</code></td><td>Planning, tool selection <i>(text only)</i></td></tr>
+<tr><td></td><td>Groq · <code>llama-3.1-8b-instant</code></td><td>Classification, disambiguation, verification <i>(text only)</i></td></tr>
 <tr><td><b>Perception</b></td><td><code>uiautomation</code></td><td>Windows accessibility tree</td></tr>
 <tr><td></td><td><code>mss</code> + <code>Pillow</code></td><td>Fast screen capture</td></tr>
 <tr><td></td><td><code>psutil</code></td><td>Hardware telemetry</td></tr>
@@ -477,9 +551,9 @@ jarvis/
 |:---|:---|
 | 🪟 **Windows 10/11** | Hard requirement — UI Automation + pywin32 |
 | 🐍 **Python 3.11+** | |
+| 🦙 **Ollama + `gemma3:4b`** | **Required for screen understanding.** ~3.3 GB, runs locally |
+| 🔑 **Groq API key** | Required for reasoning. Free at [console.groq.com](https://console.groq.com) |
 | 📦 **Node.js 18+** | Web dashboard only |
-| 🔑 **Groq API key** | Free at [console.groq.com](https://console.groq.com) |
-| 🦙 **Ollama** *(optional)* | For vision. `ollama pull gemma3:4b` |
 | 🎤 **Microphone** *(optional)* | For hands-free voice |
 
 ### 1️⃣ Install
@@ -505,15 +579,22 @@ GROQ_API_KEY=gsk_your_key_here
 
 > 🔒 `.env` and `*.db` are gitignored. Your key and your logs never leave your machine.
 
-### 3️⃣ Optional — enable vision
+### 3️⃣ Pull the local vision model
 
 ```bash
-ollama pull gemma3:4b
-ollama serve
+ollama pull gemma3:4b     # ~3.3 GB, one-time download
+ollama serve              # keep this running
 ```
 
-Without it, JARVIS still works fully via the accessibility tree — it just can't read icon-only
-buttons or answer *"what's on my screen?"*.
+This is JARVIS's **eyes** — every screenshot it understands goes through this model, entirely on
+your machine. Verify it's up:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+Without it JARVIS still runs, driving apps through the Windows accessibility tree, but it goes
+blind: no *"what's on my screen?"*, and no clicking icon-only buttons that have no accessible name.
 
 ### 4️⃣ Run
 
@@ -570,13 +651,13 @@ A compact 440×680 always-on-top window that stays out of your way.
 │   │ 🎙️  │   │ 👁️ Live Screen Feed  │ │
 │   ╰─────╯   └──────────────────────┘ │
 │   🟢 HANDS-FREE VOICE & VISION ACTIVE│
-│   "open the chat of Arundhati"       │
+│   "open the chat of Alice"       │
 │ ──────────────────────────────────── │
 │ Active: Chrome │ CPU: 12% │ RAM: 47% │
 │ [❌ Tab][💬 IG][📺 YT][✍️][⏰][🛑 STOP]│
 │ ┌─ ReAct Agent Console ────────────┐ │
 │ │ STATUS: Intent: multi_step       │ │
-│ │ TOOL: click → 'Arundhati Sharma' │ │
+│ │ TOOL: click → 'Alice Johnson' │ │
 │ │ JARVIS: Opened the chat, Boss.   │ │
 │ └──────────────────────────────────┘ │
 │ [ type a command...        ] [Send]  │
@@ -614,7 +695,7 @@ and why.
 { "type": "thought",   "text": "1. Open the Instagram inbox" }
 { "type": "tool_exec", "tool": "click_coordinate",
                        "output": { "status": "success",
-                                   "matched_name": "Arundhati Sharma",
+                                   "matched_name": "Alice Johnson",
                                    "on_target": true,
                                    "grounding": { "method": "exact", "confidence": 0.95 } } }
 { "type": "detail",    "text": "<full plan + evidence breakdown>" }
@@ -635,6 +716,10 @@ Tunable constants:
 
 | Constant | File | Default |
 |:---|:---|:---|
+| `OLLAMA_BASE_URL` | `screen_vision.py` | `http://localhost:11434` |
+| `VISION_MODEL` | `screen_vision.py` | `gemma3:4b` *(local)* |
+| `FAST_MODEL` | `agents/base.py` | `llama-3.1-8b-instant` |
+| `SMART_MODEL` | `agents/base.py` | `llama-3.3-70b-versatile` |
 | `MAX_WALL_SECONDS` | `agents/cortex.py` | `90` |
 | `MAX_CALLS_PER_TOOL` | `agents/cortex.py` | `3` |
 | `CONFIDENT` / `PLAUSIBLE` | `agents/anchor.py` | `0.72` / `0.42` |

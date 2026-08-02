@@ -794,11 +794,11 @@ class OllamaEngine:
 
     @classmethod
     def _extract_named_target(cls, user_command: str) -> Optional[str]:
-        """Pulls a likely proper-noun target out of the command (e.g. 'Arundhati' from 'open the chat
-        of Arundhati'). Used to stop the single-action auto-complete from declaring victory on a click
+        """Pulls a likely proper-noun target out of the command (e.g. 'Alice' from 'open the chat
+        of Alice'). Used to stop the single-action auto-complete from declaring victory on a click
         that succeeded but clearly wasn't the thing the task named — observed live: asked to 'open the
-        chat of Arundhati', the model clicked a generic 'Instagram Messages' tab (a reasonable *first*
-        step) and auto-complete immediately called that "done" without ever looking for Arundhati."""
+        chat of Alice', the model clicked a generic 'Instagram Messages' tab (a reasonable *first*
+        step) and auto-complete immediately called that "done" without ever looking for Alice."""
         words = re.findall(r'\b[A-Z][a-z]{2,}\b', user_command)
         candidates = [w for w in words if w not in cls._AUTO_COMPLETE_LEADING_VERBS]
         return candidates[0] if candidates else None
@@ -996,7 +996,7 @@ class OllamaEngine:
                 # spend another round-trip waiting for the model to notice and call speak_final (this
                 # is exactly where it previously invented an unrelated action, like clicking Minimize,
                 # after already answering an informational question). The target_mismatch check guards
-                # a related failure: the task named a specific target (e.g. "the chat of Arundhati")
+                # a related failure: the task named a specific target (e.g. "the chat of Alice")
                 # but the click that succeeded didn't actually match that name (it clicked a generic
                 # "Instagram Messages" tab instead) — a successful click isn't proof it was the RIGHT
                 # click, so don't let a name-mismatched one auto-complete the task.

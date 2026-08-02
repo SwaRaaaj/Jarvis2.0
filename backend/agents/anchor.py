@@ -6,14 +6,14 @@ click lands on the wrong thing, so ANCHOR runs before every screen-touching acti
 
 It answers three questions:
 
-  1. WHAT DID THE ORDER NAME?      extract_referent("open the chat of Arundhati") -> "Arundhati"
+  1. WHAT DID THE ORDER NAME?      extract_referent("open the chat of Alice") -> "Alice"
   2. WHERE IS THAT ON SCREEN?      ground(referent, snapshot)  -> GroundedTarget(element, coords)
   3. DID WE ACTUALLY HIT IT?       verify_on_target(referent, result) -> (ok, reason)
 
 The monolith had all three, badly, as three unrelated patches:
 
   * `_extract_named_target` looked for `\\b[A-Z][a-z]{2,}\\b` and subtracted a hand-listed verb set.
-    That finds nothing at all in "open the chat of arundhati" (voice transcription is frequently
+    That finds nothing at all in "open the chat of alice" (voice transcription is frequently
     lowercase), and finds "Chrome" in "Close Chrome" only by luck of capitalisation.
   * target matching was `named_target.lower() not in matched_name.lower()` — a substring test with
     no notion of confidence, ordinals, or near-misses.
@@ -95,7 +95,6 @@ _RELATIONAL = re.compile(
 )
 _POSSESSIVE = re.compile(r"^(.+?)'s\s+(?:chat|conversation|thread|dm|messages?|profile|page)\b", re.IGNORECASE)
 
-# Anaphora — orders that point at something established earlier rather than naming it.
 # Interrogative phrasing. "is Send visible on screen" is a question about the screen, not an order
 # to click Send — grounding it would turn every question into an action.
 #
@@ -109,6 +108,7 @@ _INTERROGATIVE = re.compile(
 )
 _POLITE_MODAL = re.compile(r"^\s*(can|could|would|will|may|please)\b", re.IGNORECASE)
 
+# Anaphora — orders that point at something established earlier rather than naming it.
 _ANAPHORA = re.compile(
     r"^(?:that|this|it|them|those|these|the same|again|do it again|same thing)\b|"
     r"\b(?:that one|this one|the other one|the same one)\b",
@@ -297,7 +297,7 @@ class AnchorAgent(Agent):
                 said = re.search(r"^(.+?)\s+(?:saying|that says|and say|to say|telling (?:him|her|them))\s+(.+)$",
                                  body, flags=re.IGNORECASE)
                 if said:
-                    # "message Arundhati saying hey" — recipient before the verb, content after.
+                    # "message Alice saying hey" — recipient before the verb, content after.
                     body, payload = said.group(1).strip(" ,.!?"), payload or said.group(2).strip(" ,.!?")
                 elif tail:
                     body = tail.group(1).strip(" ,.!?")
@@ -594,7 +594,7 @@ class AnchorAgent(Agent):
         """Checks that what the action actually touched is what the order named.
 
         This is the guard that stops the classic failure the monolith kept hitting: told to "open
-        the chat of Arundhati", it clicked a generic "Instagram Messages" tab, the click returned
+        the chat of Alice", it clicked a generic "Instagram Messages" tab, the click returned
         success, and the run declared victory. A successful click is not evidence of a *correct*
         click.
         """

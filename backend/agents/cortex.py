@@ -51,6 +51,7 @@ from .base import (
 from .anchor import AnchorAgent
 from .architect import ArchitectAgent
 from .ears import EarsAgent
+from .fovea import FoveaAgent
 from .hands import HandsAgent
 from .narrator import NarratorAgent, speechify
 from .pathfinder import PathfinderAgent
@@ -83,10 +84,11 @@ class Cortex:
         self.scholar = ScholarAgent(memory=memory, llm=self.llm)
         self.retina = RetinaAgent(vision=vision, telemetry=telemetry, llm=self.llm)
         self.anchor = AnchorAgent(self.llm)
+        self.fovea = FoveaAgent(vision=vision, llm=self.llm)
         self.triage = TriageAgent(self.llm, rule_lookup=self.scholar.lookup)
         self.architect = ArchitectAgent(self.llm)
         self.pathfinder = PathfinderAgent(self.llm, os_api=os_api)
-        self.hands = HandsAgent(self.llm, anchor=self.anchor, os_api=os_api)
+        self.hands = HandsAgent(self.llm, anchor=self.anchor, os_api=os_api, fovea=self.fovea)
         self.sentinel = SentinelAgent(self.llm)
         self.narrator = NarratorAgent(self.llm, address=address)
         self.ears = EarsAgent()
@@ -413,6 +415,7 @@ class Cortex:
             "ARCHITECT": self.architect.stats(),
             "PATHFINDER": self.pathfinder.stats(),
             "HANDS": self.hands.stats(),
+            "FOVEA": self.fovea.stats(),
             "SENTINEL": self.sentinel.stats(),
             "NARRATOR": self.narrator.stats(),
             "SCHOLAR": self.scholar.stats(),

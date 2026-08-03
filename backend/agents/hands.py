@@ -36,6 +36,7 @@ from .base import (
     normalize,
 )
 from .anchor import AnchorAgent, Referent
+from .fovea import FoveaAgent
 
 try:
     from os_automation import OSAutomation
@@ -128,9 +129,11 @@ class HandsAgent(Agent):
 
     name = "HANDS"
 
-    def __init__(self, llm: Optional[LLMClient] = None, anchor: Optional[AnchorAgent] = None, os_api: Any = None):
+    def __init__(self, llm: Optional[LLMClient] = None, anchor: Optional[AnchorAgent] = None,
+                 os_api: Any = None, fovea: Optional[FoveaAgent] = None):
         super().__init__(llm)
         self.anchor = anchor or AnchorAgent(llm)
+        self.fovea = fovea or FoveaAgent(llm=llm)
         self.os = os_api or OSAutomation
         self.executions: int = 0
         self.deterministic: int = 0
@@ -193,21 +196,34 @@ class HandsAgent(Agent):
                 except Exception:
                     coords = None
                 if coords:
-                    result = self._invoke("click_coordinate", {"x": int(coords[0]), "y": int(coords[1])},
-                                          ctx, referent, matched_name=described)
-                    result["grounding"] = {"method": "vision", "confidence": 0.6, "referent": described}
+                    fine = self.fovea.refine(coords, described, ctx)
+                    result = self._invoke("click_coordinate", {"x": fine.x, "y": fine.y},
+                                          ctx, referent, matched_name=fine.snapped_to or described)
+                    result["grounding"] = {"method": f"vision+{fine.method}",
+                                           "confidence": fine.confidence, "referent": described}
+                    result["precision"] = fine.as_dict()
                     return result
 
             if target.resolved:
                 self.deterministic += 1
                 double = bool(re.search(r"\bdouble[- ]?click\b", order_text, re.IGNORECASE)) \
                     or self._looks_like_file(target.element.name)
+
+                x, y = target.element.x, target.element.y
+                precision = None
+                if target.method == "vision":
+                    # A grid-derived point can sit up to ~80px from the target on a 1080p screen,
+                    # which misses a 30px button entirely. FOVEA snaps it onto the real control.
+                    fine = self.fovea.refine((x, y), referent.text or target.referent, ctx)
+                    x, y, precision = fine.x, fine.y, fine.as_dict()
+
                 result = self._invoke(
-                    "click_coordinate",
-                    {"x": target.element.x, "y": target.element.y, "double": double},
+                    "click_coordinate", {"x": x, "y": y, "double": double},
                     ctx, referent, matched_name=target.element.name,
                 )
                 result["grounding"] = target.as_dict()
+                if precision:
+                    result["precision"] = precision
                 return self._apply_scope_guard(result, referent, order_text, ctx)
             self._emit(ctx, "status", f"couldn't place {referent.describe()} on screen — {target.reason}")
 

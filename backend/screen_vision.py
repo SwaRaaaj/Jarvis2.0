@@ -99,6 +99,110 @@ class ScreenVision:
         except Exception:
             return {"name": "Target Item", "type": "Control", "x": cx, "y": cy}
 
+    def element_at_point(self, x: int, y: int) -> Optional[Dict[str, Any]]:
+        """The real UI control occupying a given pixel, with its exact bounds.
+
+        This is the highest-value primitive for click precision, because `ControlFromPoint` hits
+        the UI Automation provider directly at one coordinate — it routinely returns a control that
+        a full tree walk never surfaced. That means a rough visual estimate can be snapped onto the
+        true centre of the real control, turning a +/-80px grid guess into an exact hit, with no
+        model call at all.
+        """
+        try:
+            control = auto.ControlFromPoint(int(x), int(y))
+            if not control:
+                return None
+            rect = control.BoundingRectangle
+            width, height = rect.width(), rect.height()
+            if width <= 0 or height <= 0:
+                return None
+            return {
+                "name": (control.Name or "").strip(),
+                "type": control.ControlTypeName,
+                "x": (rect.left + rect.right) // 2,
+                "y": (rect.top + rect.bottom) // 2,
+                "left": rect.left, "top": rect.top, "width": width, "height": height,
+            }
+        except Exception:
+            return None
+
+    def locate_in_region(
+        self,
+        description: str,
+        center: Tuple[int, int],
+        region_w: int = 420,
+        region_h: int = 320,
+        model: str = VISION_MODEL,
+        timeout: int = 45,
+    ) -> Optional[Tuple[int, int]]:
+        """Second-pass visual location within a cropped region around a coarse estimate.
+
+        The full-screen grid quantises to ~160x154 real pixels per cell on a 1920x1080 display, so
+        a click derived from it can land 80px from the target — far outside a typical 30px button.
+        Cropping to the neighbourhood and upscaling gives the model the same grid resolution over a
+        much smaller area, cutting the quantisation error by roughly an order of magnitude.
+        """
+        img = self.capture_screen_pil()
+        if img is None:
+            return None
+        try:
+            cx, cy = int(center[0]), int(center[1])
+            half_w, half_h = region_w // 2, region_h // 2
+            left = max(0, min(cx - half_w, img.width - region_w))
+            top = max(0, min(cy - half_h, img.height - region_h))
+            right, bottom = min(img.width, left + region_w), min(img.height, top + region_h)
+            crop = img.crop((left, top, right, bottom))
+
+            # Upscale so the printed grid labels stay legible to the model at this zoom level.
+            target_w = 900
+            scale = target_w / crop.width
+            zoomed = crop.resize((target_w, int(crop.height * scale)), Image.Resampling.LANCZOS)
+
+            draw = ImageDraw.Draw(zoomed)
+            cell_px = 90
+            cols = max(1, zoomed.width // cell_px)
+            rows = max(1, zoomed.height // cell_px)
+            cell_w, cell_h = zoomed.width / cols, zoomed.height / rows
+
+            meta: Dict[str, Tuple[int, int]] = {}
+            for r in range(rows):
+                for c in range(cols):
+                    label = self._col_label(c) + str(r + 1)
+                    x0, y0 = c * cell_w, r * cell_h
+                    draw.rectangle([x0, y0, x0 + cell_w, y0 + cell_h], outline=(255, 0, 0), width=1)
+                    draw.text((x0 + 3, y0 + 3), label, fill=(255, 255, 0))
+                    meta[label] = (int(left + (x0 + cell_w / 2) / scale),
+                                   int(top + (y0 + cell_h / 2) / scale))
+
+            buf = io.BytesIO()
+            zoomed.save(buf, format="JPEG", quality=80)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+            prompt = (
+                "This is a ZOOMED-IN crop of part of a screen, with a red grid drawn over it and "
+                "yellow cell labels like A1, B3, C4.\n"
+                f"Find this exactly: \"{description}\".\n"
+                "Reply with ONLY the single grid cell label containing its centre, nothing else. "
+                "If it is not visible in this crop, reply with exactly: NONE"
+            )
+            resp = requests.post(
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json={"model": model,
+                      "messages": [{"role": "user", "content": prompt, "images": [b64]}],
+                      "stream": False, "options": {"temperature": 0.0}},
+                timeout=timeout,
+            )
+            if resp.status_code != 200:
+                return None
+            answer = resp.json().get("message", {}).get("content", "").strip().upper()
+            if "NONE" in answer and len(answer) < 8:
+                return None
+            match = re.search(r"\b([A-Z]{1,2}\d{1,3})\b", answer)
+            return meta.get(match.group(1)) if match else None
+        except Exception as e:
+            print(f"[Region Locate Error]: {e}")
+            return None
+
     def get_open_browser_tabs(self) -> List[str]:
         """Scans active foreground browser window using UI Automation to extract real open tab names."""
         tabs = []

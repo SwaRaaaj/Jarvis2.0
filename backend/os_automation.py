@@ -35,6 +35,16 @@ SOCIAL_INBOX_URLS = {
 # Shared with OllamaEngine's deterministic "open/launch <app>" fast path, so a request for a known
 # app never has to go through the LLM ReAct loop at all (small local models can and do hallucinate
 # unrelated tool calls even for obvious single-tool requests — see launch_app's docstring).
+# Chromium keeps its renderer accessibility tree switched off until something asks for it, and
+# WM_GETOBJECT alone does not wake it (measured). Without the flag, UI Automation sees the browser
+# frame — tabs, toolbar, Minimize — and *nothing at all* of the page, so clicking anything on a web
+# page has to fall back to visual guessing, which lands ~80px off.
+#
+# With the flag, page content appears in the tree with exact bounding rectangles, which makes
+# clicking pixel-perfect and free. Verified: a page's heading and links become real, addressable
+# controls. Only applies to browsers JARVIS launches itself.
+CHROMIUM_A11Y_FLAG = "--force-renderer-accessibility"
+
 APP_ALIASES = {
     "vs code": "code",
     "vscode": "code",
@@ -318,6 +328,13 @@ class OSAutomation:
         try:
             clean_name = app_name.lower().strip()
             target = APP_ALIASES.get(clean_name, clean_name)
+
+            # Launch Chromium browsers with accessibility on, so page content is clickable by name
+            # and coordinate rather than by visual guesswork. Harmless if the browser is already
+            # running (the flag only applies to a cold start).
+            if target in ("start chrome", "start msedge"):
+                target = f"{target} {CHROMIUM_A11Y_FLAG}"
+
             if target.startswith("start "):
                 # "start" is an async shell launcher with no reliable exit-code signal — this path is
                 # only used for known-good aliases above, so we trust it.

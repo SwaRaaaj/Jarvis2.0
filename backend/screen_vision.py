@@ -99,6 +99,37 @@ class ScreenVision:
         except Exception:
             return {"name": "Target Item", "type": "Control", "x": cx, "y": cy}
 
+    def page_content_accessible(self, hwnd: Optional[int] = None) -> Optional[bool]:
+        """Whether a browser window is exposing its page content to UI Automation.
+
+        Returns None when the window isn't a browser, so callers can tell "not applicable" from
+        "browser with an unreadable page". A Chromium window that reports a Document node with no
+        children is running without renderer accessibility: JARVIS can see the tabs and toolbar but
+        nothing on the page itself, which is precisely when clicking degrades to visual guessing.
+        """
+        if hwnd is None:
+            hwnd, _ = self.get_target_window()
+        if not hwnd:
+            return None
+        try:
+            title = win32gui.GetWindowText(hwnd) or ""
+            if not any(b in title for b in ("Chrome", "Edge", "Chromium", "Brave", "Opera")):
+                return None
+            root = auto.ControlFromHandle(hwnd)
+            if not root:
+                return None
+            for control, _ in auto.WalkControl(root, maxDepth=10):
+                try:
+                    if "Document" not in control.ControlTypeName:
+                        continue
+                    for _child, _d in auto.WalkControl(control, maxDepth=3):
+                        return True          # the document has descendants: the page is readable
+                except Exception:
+                    continue
+            return False
+        except Exception:
+            return None
+
     def element_at_point(self, x: int, y: int) -> Optional[Dict[str, Any]]:
         """The real UI control occupying a given pixel, with its exact bounds.
 

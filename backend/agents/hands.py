@@ -225,7 +225,9 @@ class HandsAgent(Agent):
                 if precision:
                     result["precision"] = precision
                 return self._apply_scope_guard(result, referent, order_text, ctx)
-            self._emit(ctx, "status", f"couldn't place {referent.describe()} on screen — {target.reason}")
+            hint = self._browser_accessibility_hint()
+            self._emit(ctx, "status",
+                       f"couldn't place {referent.describe()} on screen — {target.reason}{hint}")
 
         # --- defeated both: one model call over 9 tools ------------------------------------
         return self._execute_via_model(step, snapshot, ctx, model, referent, correction)
@@ -289,6 +291,34 @@ class HandsAgent(Agent):
         m = re.search(r"\b(?:saying|that says|to say|type|write|enter)\s+(.+)$", text, re.IGNORECASE)
         if m:
             return m.group(1).strip(" ,.!?")
+        return ""
+
+    def _browser_accessibility_hint(self) -> str:
+        """Explains *why* a click failed when the cause is a browser hiding its page.
+
+        A generic "I couldn't find it" is useless here, because the fix is concrete and one step
+        away: a Chromium browser started without renderer accessibility exposes its tabs and
+        toolbar but none of the page, and relaunching it through JARVIS turns every page element
+        into an exactly-addressable control.
+        """
+        try:
+            from screen_vision import ScreenVision  # local import keeps the agent layer portable
+        except Exception:
+            return ""
+        vision = getattr(self, "_vision_probe", None)
+        if vision is None:
+            try:
+                vision = ScreenVision()
+                self._vision_probe = vision
+            except Exception:
+                return ""
+        try:
+            if vision.page_content_accessible() is False:
+                return (" — this browser is running without accessibility, so I can see its tabs "
+                        "but not the page. Ask me to open Chrome and I'll start it so I can read "
+                        "the page properly.")
+        except Exception:
+            pass
         return ""
 
     @staticmethod

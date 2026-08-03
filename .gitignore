@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 frontend/dist/
 *.db
+
+# uiautomation writes this next to whatever process imported it
+@AutomationLog.txt

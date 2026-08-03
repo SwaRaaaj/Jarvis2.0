@@ -367,8 +367,16 @@ class JarvisDesktopApp:
     def start_voice_listener_thread(self):
         def listener_loop():
             r = sr.Recognizer()
-            r.pause_threshold = 0.8
+            # Tuned for command dictation rather than the library's dictation-friendly defaults.
+            r.pause_threshold = 0.6          # commands are short; 0.8s of trailing silence felt laggy
+            r.phrase_threshold = 0.2         # don't discard brief utterances like "stop"
+            r.non_speaking_duration = 0.4
             r.energy_threshold = 300
+            # The fixed threshold was the single worst setting here: a room that gets noisier than
+            # the calibration moment goes deaf, and one that gets quieter triggers on nothing.
+            r.dynamic_energy_threshold = True
+
+            scribe = getattr(getattr(self.ollama, "cortex", None), "scribe", None)
 
             while True:
                 if self.is_continuous and not self.is_processing and not self.voice.is_speaking:
@@ -381,7 +389,24 @@ class JarvisDesktopApp:
                                 self.ears.note_calibration()
                             self.root.after(0, self.transcript_lbl.config, {"text": "🎙️ Listening..."})
                             audio = r.listen(source, timeout=4, phrase_time_limit=8)
-                            text = r.recognize_google(audio)
+
+                            # show_all keeps the recogniser's whole ranked guess list plus
+                            # confidences. The old call took only the top string and discarded the
+                            # rest — throwing away exactly the information needed to notice that a
+                            # lower-ranked alternative matches something really on screen.
+                            text = ""
+                            if scribe is not None:
+                                try:
+                                    raw = r.recognize_google(audio, show_all=True)
+                                    result = scribe.transcribe(raw)
+                                    text = result.text
+                                    if result.changed:
+                                        self.root.after(0, self.append_log,
+                                                        f"[HEARD] '{result.original}' -> '{text}'")
+                                except Exception:
+                                    text = ""
+                            if not text:
+                                text = r.recognize_google(audio)
                             if not text.strip():
                                 continue
 

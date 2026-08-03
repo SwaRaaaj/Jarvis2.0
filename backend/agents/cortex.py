@@ -57,6 +57,7 @@ from .narrator import NarratorAgent, speechify
 from .pathfinder import PathfinderAgent
 from .retina import RetinaAgent
 from .scholar import ScholarAgent
+from .scribe import ScribeAgent
 from .sentinel import SentinelAgent
 from .triage import TriageAgent
 from .vigil import VigilAgent
@@ -92,6 +93,7 @@ class Cortex:
         self.sentinel = SentinelAgent(self.llm)
         self.narrator = NarratorAgent(self.llm, address=address)
         self.ears = EarsAgent()
+        self.scribe = ScribeAgent(self.llm, retina=self.retina, scholar=self.scholar)
         self.vigil = VigilAgent(self.retina, self.llm)
 
         self.history: List[Dict[str, str]] = []
@@ -420,6 +422,7 @@ class Cortex:
             "NARRATOR": self.narrator.stats(),
             "SCHOLAR": self.scholar.stats(),
             "EARS": self.ears.stats(),
+            "SCRIBE": self.scribe.stats(),
             "VIGIL": self.vigil.stats(),
             "llm_calls_total": self.llm.calls,
         }

@@ -20,8 +20,8 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 <br>
 
 ![Local Vision](https://img.shields.io/badge/vision-100%25_local-10b981?style=flat-square)
-![Agents](https://img.shields.io/badge/agents-11-06b6d4?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-229_passing-10b981?style=flat-square)
+![Agents](https://img.shields.io/badge/agents-12-06b6d4?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-256_passing-10b981?style=flat-square)
 ![Grounding](https://img.shields.io/badge/grounding_accuracy-100%25-10b981?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-8b5cf6?style=flat-square)
 
@@ -38,6 +38,7 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 - [The Agent Cortex](#-the-agent-cortex)
 - [How an Order Flows](#-how-an-order-flows)
 - [How JARVIS Sees](#-how-jarvis-sees)
+- [VIGIL — Instant Screen Answers](#️-vigil--why-whats-on-my-screen-is-instant)
 - [How JARVIS Learns](#-how-jarvis-learns)
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
@@ -90,7 +91,7 @@ time: ~2,000 tokens of tool schemas per call, a full UI-Automation tree walk per
 
 A three-action task cost roughly **six 70B round-trips**.
 
-JARVIS 2.0 splits that work across **11 specialised agents**, each with one job and a small prompt.
+JARVIS 2.0 splits that work across **12 specialised agents**, each with one job and a small prompt.
 Most orders now resolve with **zero model calls at all**.
 
 ---
@@ -162,7 +163,7 @@ flowchart TB
 
     subgraph Brain["🧠  Agent Cortex"]
         CORTEX["CORTEX orchestrator"]
-        AGENTS["10 specialised agents"]
+        AGENTS["11 specialised agents"]
     end
 
     subgraph Perception["👁️  Perception & Actuation"]
@@ -270,7 +271,7 @@ The class is still named `OllamaEngine` — a fossil from when everything ran lo
 
 ## 🧬 The Agent Cortex
 
-Eleven agents. Each does one job, with a small prompt and a small tool surface.
+Twelve agents. Each does one job, with a small prompt and a small tool surface.
 
 | Agent | Role | Model calls |
 |:------|:-----|:------------|
@@ -283,6 +284,7 @@ Eleven agents. Each does one job, with a small prompt and a small tool surface.
 | 🛡️ **SENTINEL** | Verifies each step from screen evidence | Usually **0** |
 | 🗣️ **NARRATOR** | Composes the spoken reply *and* the detailed report | 0–1 *(8B)* |
 | 🎓 **SCHOLAR** | Mines the execution log into zero-cost shortcuts | 0 |
+| 👁️‍🗨️ **VIGIL** | Ambient observer — keeps a warm understanding of the screen so questions answer instantly | background only |
 | 👂 **EARS** | Voice gate — was this speech even addressed to JARVIS? | 0 |
 | 🧠 **CORTEX** | Orchestrator wiring them all together | — |
 
@@ -400,21 +402,27 @@ what makes it fast.
 
 ```mermaid
 flowchart TB
-    subgraph A["🔴  LAYER 1 — ALWAYS ON"]
+    subgraph A["🔴  LAYER 1 — THE LIVE FEED, ALWAYS ON"]
         direction LR
-        CAP["🎥 Live screen feed<br/><b>continuous video, 2 Hz</b><br/>~1 ms/frame"] --> MIRROR["Live mirror in HUD<br/>+ dashboard"]
-        CAP --> DIGEST["16×16 frame digest<br/><i>did anything change?</i>"]
+        CAP["🎥 One shared capture loop<br/><b>5 Hz active · 0.5 Hz idle</b><br/>~1 ms/frame"]
+        CAP --> DIG["16×16 digest + change magnitude"]
+        DIG --> GATE{"changed?"}
+        GATE -->|no| DROP["🚫 suppressed<br/><i>nothing sent, nothing encoded</i>"]
+        GATE -->|yes| PUB["📡 published to subscribers<br/>dashboard · HUD · VIGIL"]
     end
 
-    subgraph B["🟡  LAYER 2 — ON DEMAND, CACHED"]
-        TREE["🌳 UI Automation tree<br/>every named control + coords<br/><b>~630 ms</b> · re-walked only on change"]
+    subgraph B["🟡  LAYER 2 — STRUCTURE, ON DEMAND"]
+        TREE["🌳 UI Automation tree<br/>every control + coords<br/><b>~630 ms</b> · re-walked only on change"]
     end
 
-    subgraph C["🟢  LAYER 3 — LAST RESORT"]
-        VIS["🧠 gemma3:4b inference<br/>reads the actual pixels<br/><b>5–19 s</b>"]
+    subgraph C["🟢  LAYER 3 — UNDERSTANDING"]
+        VIG["👁️‍🗨️ VIGIL<br/><i>ambient, in the background</i><br/>looks once when the screen settles"]
+        VIS["🧠 gemma3:4b<br/><b>5–19 s</b>"]
+        VIG --> VIS
     end
 
-    DIGEST -->|"screen changed"| TREE
+    PUB --> TREE
+    PUB --> VIG
     TREE -->|"no control matches"| VIS
 
     style A fill:#7f1d1d,stroke:#ef4444,color:#fff
@@ -424,13 +432,70 @@ flowchart TB
 
 | Layer | Runs | Cost | What it gives you |
 |:---|:---|:---|:---|
-| 🎥 **Live feed** | **Continuous video, 2 Hz** | ~1 ms/frame | Live screen mirror, change detection |
-| 🌳 **Accessibility tree** | On demand, cached | ~630 ms | Every control name + exact pixel coords |
-| 🧠 **Vision model** | Only when the tree fails | 5–19 s | Understanding of pixels the tree can't describe |
+| 🎥 **Live feed** | **Continuous, adaptive** | ~1 ms/frame | Live mirror, change detection |
+| 🌳 **Accessibility tree** | On demand, cached | ~630 ms | Every control name + exact coords |
+| 👁️‍🗨️ **VIGIL** | Background, when settled | free to *ask* | A warm description of the screen |
+| 🧠 **Vision model** | Last resort | 5–19 s | Pixels the tree can't describe |
 
-> **Why not run the vision model continuously?** At 5–19 s per inference it would be ~40× slower
-> than the capture loop it's trying to keep up with. The screen is watched constantly; the *model*
-> is invoked when there's a question the accessibility tree genuinely can't answer.
+### One capture, many consumers
+
+The screen used to be grabbed independently by **four** different places — RETINA's change check,
+the dashboard broadcaster, the desktop HUD thumbnail, and every vision call — each taking its own
+full-screen grab twice a second. RETINA now owns a single capture loop and everything else
+subscribes to it.
+
+### The feed only speaks when something happens
+
+Frames are **change-gated**. The old broadcaster pushed a fresh base64 JPEG over the WebSocket
+every 500 ms whether or not a single pixel had moved. Measured on a real idle screen:
+
+```
+26 frames captured  →  1 published  →  25 suppressed     (96% suppressed)
+```
+
+JPEG encoding is skipped entirely when nobody is subscribed, which is the normal case for the
+desktop HUD running without the dashboard open.
+
+### The rate follows the screen
+
+`5 Hz` while things are moving, dropping to `0.5 Hz` after 3 seconds of stillness. An animation
+gets smooth frames; a static editor costs almost nothing.
+
+---
+
+## 👁️‍🗨️ VIGIL — why "what's on my screen?" is instant
+
+The feed watches continuously, but until VIGIL nothing *understood* it continuously. Every screen
+question meant a cold 5–19 second vision call, from a standing start, even on a screen that had
+been untouched for ten minutes.
+
+VIGIL watches the feed and — when the screen has meaningfully changed **and then settled** — spends
+one vision call in the background and caches what it saw. The next question is answered from that.
+
+**Measured on a real screen:**
+
+| | Before | After |
+|:---|:---|:---|
+| *"what can you see"* | **10.30 s** | **0.53 s** |
+| asked again | 10.30 s | **0.45 s** |
+| vision calls for 2 questions | 2 | **1** *(a background one)* |
+
+It is built to be invisible, and to be an optimisation that can never become a dependency:
+
+- **Only on real change** — drift must exceed a threshold; a blinking caret is not news
+- **Only once settled** — describes a finished page, not a half-painted one
+- **Never during a task** — CORTEX pauses it while an order runs, because the vision model is
+  single-threaded and ambient curiosity must not compete with real work
+- **Rate limited** — a hard floor between looks, so a full-screen video can't pin the model
+- **Fails silent** — Ollama down? It backs off. The screen-query path just behaves as it did before
+
+> ⚠️ Freshness is judged by how far the screen has **drifted**, not by exact equality. An
+> identical-digest test sounds correct but is far too strict in practice — a blinking terminal
+> cursor changes the digest while leaving the description perfectly accurate. Measured live, that
+> strictness meant the cache essentially never served and every question fell through to a cold
+> call anyway.
+
+### Choosing between the tree and the model
 
 ### Choosing between the tree and the model
 
@@ -518,7 +583,7 @@ A learned rule fires **without review**, so the bar to create one is deliberatel
 <tr><td><b>Dashboard</b></td><td>React 18 + Vite 5 + lucide-react</td><td>Web command center</td></tr>
 <tr><td><b>Desktop HUD</b></td><td>Tkinter</td><td>Always-on-top floating widget</td></tr>
 <tr><td><b>Storage</b></td><td>SQLite</td><td>Profile, execution log, learned rules</td></tr>
-<tr><td><b>Testing</b></td><td>pytest</td><td>229 tests, fully offline</td></tr>
+<tr><td><b>Testing</b></td><td>pytest</td><td>256 tests, fully offline</td></tr>
 </table>
 
 ---
@@ -552,16 +617,18 @@ jarvis/
 │   │   ├── sentinel.py             🛡️ verification
 │   │   ├── narrator.py             🗣️ response composition
 │   │   ├── scholar.py              🎓 learning
+│   │   ├── vigil.py                👁️‍🗨️ ambient observer
 │   │   ├── ears.py                 👂 voice gate
 │   │   └── cortex.py               🧠 orchestrator
 │   │
-│   └── 🧪 tests/                   229 tests · no Windows/network/model needed
+│   └── 🧪 tests/                   256 tests · no Windows/network/model needed
 │       ├── conftest.py             Fakes for screen, OS, model
 │       ├── test_anchor.py          Grounding & scope guard
 │       ├── test_retina.py          Caching & observation
 │       ├── test_routing.py         TRIAGE + ARCHITECT
 │       ├── test_executors.py       PATHFINDER + HANDS
 │       ├── test_verification.py    SENTINEL + NARRATOR
+│       ├── test_feed.py            Live feed + VIGIL
 │       ├── test_learning.py        SCHOLAR + EARS
 │       ├── test_cortex.py          End-to-end pipeline
 │       └── test_benchmark_old_vs_new.py   Head-to-head accuracy
@@ -810,6 +877,9 @@ Generated from real UI-Automation captures of a running Chrome window, with real
 | Deterministic order (*"what time is it"*) | **0.01 s**, 0 model calls |
 | Chat reply (8B) | 0.39 s, 1 call |
 | 🐌 Vision call (`gemma3:4b`) | **5–19 s** |
+| 🎥 Live feed frame | ~1 ms |
+| *"what can you see"* — cold | 10.30 s |
+| *"what can you see"* — via VIGIL | **0.53 s** |
 
 ### Model calls per task
 
@@ -826,7 +896,7 @@ Generated from real UI-Automation captures of a running Chrome window, with real
 
 ```bash
 cd backend
-python -m pytest tests/ -q                                  # all 229
+python -m pytest tests/ -q                                  # all 256
 python -m pytest tests/test_anchor.py -v                    # grounding
 python -m pytest tests/test_benchmark_old_vs_new.py -s      # print the benchmark
 ```
@@ -835,7 +905,7 @@ Every agent takes its screen, OS and model dependencies by injection, so the ent
 any machine — **no Windows, no microphone, no Groq account, no Ollama daemon required**.
 
 ```
-229 passed in 8.92s
+256 passed in 14.2s
 ```
 
 ---
@@ -864,6 +934,7 @@ Being straight with you about what doesn't work yet:
 - [ ] Install Tailwind properly, or convert the dashboard to pure custom CSS
 - [ ] Automated live-app integration tests in a Windows VM
 - [ ] Multi-monitor support
+- [ ] Let VIGIL summarise a session timeline ("what was I working on?")
 - [ ] Undo / action rollback
 - [ ] Per-app learned tool preferences in SCHOLAR
 

@@ -115,12 +115,16 @@ class FakeVision:
         self.elements = elements or []
         self.colour = colour
         self.walks = 0
+        self.captures = 0
+        self.last_captured_image = None
         self.vision_questions: List[str] = []
         self.vision_answer = "There is a chat window open with several conversations."
         self.locate_result = None
 
     def capture_screen_pil(self):
-        return Image.new("RGB", (64, 64), (self.colour, self.colour, self.colour))
+        self.captures += 1
+        self.last_captured_image = Image.new("RGB", (64, 64), (self.colour, self.colour, self.colour))
+        return self.last_captured_image
 
     def find_visible_ui_elements(self, max_depth: int = 8, max_elements: int = 400):
         self.walks += 1

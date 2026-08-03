@@ -58,6 +58,7 @@ from .retina import RetinaAgent
 from .scholar import ScholarAgent
 from .sentinel import SentinelAgent
 from .triage import TriageAgent
+from .vigil import VigilAgent
 
 MAX_WALL_SECONDS = 90
 MAX_CALLS_PER_TOOL = 3
@@ -89,6 +90,7 @@ class Cortex:
         self.sentinel = SentinelAgent(self.llm)
         self.narrator = NarratorAgent(self.llm, address=address)
         self.ears = EarsAgent()
+        self.vigil = VigilAgent(self.retina, self.llm)
 
         self.history: List[Dict[str, str]] = []
         self._stop = threading.Event()
@@ -103,6 +105,19 @@ class Cortex:
         """Backfills learned rules from the existing execution log. Safe to call at startup."""
         return self.scholar.mine()
 
+    def start_ambient(self, quality: int = 40, scale: float = 0.35) -> None:
+        """Starts the live screen feed and the ambient observer.
+
+        Opt-in rather than automatic: it spawns two background threads and periodically uses the
+        local vision model, which a short-lived process or a test run has no use for.
+        """
+        self.retina.start_feed(quality=quality, scale=scale)
+        self.vigil.start()
+
+    def stop_ambient(self) -> None:
+        self.vigil.stop()
+        self.retina.stop_feed()
+
     # ------------------------------------------------------------------
     # Main entry point — yields the same event dicts the UIs already handle
     # ------------------------------------------------------------------
@@ -113,10 +128,15 @@ class Cortex:
         started = time.time()
         ctx = AgentContext(order=order, history=self.history, model=model)
 
+        # The vision model is slow and single-threaded. Ambient curiosity must never compete with
+        # an order the user actually gave.
+        self.vigil.pause()
         try:
             yield from self._run_inner(order, model, ctx, started)
         except Exception as e:  # noqa: BLE001 — a crash must still produce a spoken reply
             yield {"type": "response", "text": f"Something went wrong on my side, Boss — {e}"}
+        finally:
+            self.vigil.resume()
 
     def _run_inner(
         self, order: str, model: str, ctx: AgentContext, started: float
@@ -136,8 +156,24 @@ class Cortex:
             return
 
         if intent.kind == "screen_query":
-            yield {"type": "status", "message": "Looking at your screen..."}
             question = str(intent.slots.get("question") or order)
+
+            # VIGIL may already understand this exact screen. When it does the reply is instant
+            # instead of the 5-19 seconds a cold vision call costs, and no model runs at all.
+            cached = self.vigil.current_view()
+            if cached is not None:
+                yield {"type": "status", "message": f"Already watching — seen {cached.age:.0f}s ago"}
+                spoken = self.narrator.answer_question(question, cached.text, ctx)
+                yield {"type": "tool_exec", "tool": "vigil_cache",
+                       "input": {"question": question},
+                       "output": {"status": "success", "answer": cached.text,
+                                  "age_seconds": round(cached.age, 1), "source": "ambient"}}
+                detail = (f'Question: "{question}"\n\nAnswered from the ambient observer '
+                          f'(seen {cached.age:.0f}s ago in "{cached.window_title}").\n\n{cached.text}')
+                yield from self._finish(order, spoken, ctx, started, detail=detail)
+                return
+
+            yield {"type": "status", "message": "Looking at your screen..."}
             answer = self.retina.ask(question, ctx)
             if not answer:
                 yield from self._finish(order, "I couldn't get a clear read on the screen, Boss.",
@@ -376,5 +412,6 @@ class Cortex:
             "NARRATOR": self.narrator.stats(),
             "SCHOLAR": self.scholar.stats(),
             "EARS": self.ears.stats(),
+            "VIGIL": self.vigil.stats(),
             "llm_calls_total": self.llm.calls,
         }

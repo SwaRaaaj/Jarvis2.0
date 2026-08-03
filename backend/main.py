@@ -125,25 +125,66 @@ manager = ConnectionManager()
 
 # Background Telemetry & Screen Perception Broadcaster Loop
 async def telemetry_broadcaster():
+    """Streams telemetry and the live screen feed to connected dashboards.
+
+    The screen frame is sourced from RETINA's single shared capture loop rather than grabbing the
+    screen again here — previously this coroutine and RETINA each took their own full-screen grab
+    every cycle, doing the same expensive work twice.
+
+    Frames are also change-gated. The old loop pushed a fresh base64 JPEG every 500 ms even when
+    the screen was completely static, which is tens of KB per tick of pure waste on an idle
+    machine. Now an unchanged screen sends telemetry only, and the dashboard keeps showing the last
+    frame it received.
+    """
+    retina = ollama.cortex.retina if ollama.cortex is not None else None
+    last_sent_digest = ""
+
     while True:
         if manager.active_connections:
             try:
                 live_metrics = PCTelemetry.get_live_metrics()
-                screen_frame = vision.capture_base64_jpeg(quality=40, scale=0.35)
-                await manager.broadcast({
+                payload = {
                     "type": "telemetry_tick",
                     "telemetry": live_metrics,
-                    "screen_frame": screen_frame,
-                    "is_speaking": voice.is_speaking
-                })
-            except Exception as e:
+                    "is_speaking": voice.is_speaking,
+                }
+
+                if retina is not None:
+                    frame = retina.latest_frame()
+                    if frame is not None and frame.jpeg_b64 and frame.digest != last_sent_digest:
+                        payload["screen_frame"] = frame.jpeg_b64
+                        payload["frame_seq"] = frame.seq
+                        payload["change"] = round(frame.magnitude, 4)
+                        last_sent_digest = frame.digest
+                else:
+                    # Legacy engine: no shared feed available, fall back to a direct grab.
+                    payload["screen_frame"] = vision.capture_base64_jpeg(quality=40, scale=0.35)
+
+                await manager.broadcast(payload)
+            except Exception:
                 pass
-        await asyncio.sleep(0.5)  # 2 Hz update rate
+        await asyncio.sleep(0.5)
 
 @app.on_event("startup")
 async def startup_event():
+    # Starts the shared capture loop plus VIGIL, the ambient observer that keeps a warm
+    # understanding of the screen so "what's on my screen?" answers instantly.
+    if ollama.cortex is not None:
+        try:
+            ollama.cortex.start_ambient()
+        except Exception as e:
+            print(f"[Ambient perception unavailable]: {e}")
     asyncio.create_task(telemetry_broadcaster())
     voice.speak("JARVIS AI Brain online and operational, Boss.")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if ollama.cortex is not None:
+        try:
+            ollama.cortex.stop_ambient()
+        except Exception:
+            pass
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

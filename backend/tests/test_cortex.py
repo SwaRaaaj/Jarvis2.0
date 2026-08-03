@@ -131,6 +131,49 @@ def test_screen_question_answers_instead_of_clicking():
     assert "code editor" in responses[0]["text"]
 
 
+def test_ambient_observer_answers_screen_questions_without_a_vision_call():
+    """A screen question used to cost 5-19s of cold vision inference every single time. When VIGIL
+    already understands the current screen, the reply is instant and no model runs at all."""
+    cortex, _, _ = build(elements=[el("Inbox", "ListItemControl")])
+    cortex.retina.capture_frame()
+    cortex.retina.vision.vision_answer = "A mail client showing an inbox."
+    cortex.vigil._observe()
+
+    calls_before = cortex.retina.vision_calls
+    events, responses = collect(cortex, "what can you see")
+
+    assert "mail client" in responses[0]["text"]
+    assert cortex.retina.vision_calls == calls_before, "the cached view must serve it"
+    assert any(e.get("tool") == "vigil_cache" for e in events if e["type"] == "tool_exec")
+
+
+def test_a_screen_question_after_navigating_away_is_not_answered_from_cache():
+    """Describing a screen the user has since left is worse than admitting we don't know."""
+    cortex, _, _ = build(elements=[el("Inbox", "ListItemControl")])
+    cortex.retina.capture_frame()
+    cortex.vigil._observe()
+
+    cortex.retina.vision.change_screen(elements=[el("Something Else", "ButtonControl")])
+    cortex.retina.vision.vision_answer = "A completely different application."
+    cortex.retina.capture_frame()
+
+    _, responses = collect(cortex, "what can you see")
+    assert "different application" in responses[0]["text"]
+    assert cortex.vigil.stale_misses >= 1
+
+
+def test_ambient_observer_is_paused_while_an_order_runs():
+    """The vision model is single-threaded; ambient curiosity must not compete with real work."""
+    cortex, _, _ = build()
+    seen = []
+    original = cortex.vigil.pause
+    cortex.vigil.pause = lambda: (seen.append("paused"), original())[1]
+
+    collect(cortex, "open chrome")
+    assert seen == ["paused"]
+    assert cortex.vigil._paused.is_set() is False, "and resumed afterwards"
+
+
 def test_screen_question_reply_is_the_answer_not_done():
     cortex, _, _ = build()
     cortex.retina.vision.vision_answer = "A browser is open on a news site."

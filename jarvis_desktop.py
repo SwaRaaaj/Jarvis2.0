@@ -314,18 +314,49 @@ class JarvisDesktopApp:
             self.root.after(0, self.set_status, "⚡ READY FOR COMMAND", "#0f172a", "#38bdf8", "idle")
 
     def start_background_vision(self):
+        """Drives the HUD thumbnail from RETINA's shared feed.
+
+        This used to be a third independent capture loop taking its own full-screen grab twice a
+        second, on top of the ones RETINA and the API server were already doing. Now it subscribes
+        to the single shared feed and only redraws when the screen actually changed — a static
+        screen costs nothing at all.
+        """
+        cortex = getattr(self.ollama, "cortex", None)
+
+        if cortex is not None:
+            retina = cortex.retina
+
+            def on_frame(frame):
+                try:
+                    img = self.vision.last_captured_image
+                    if img is None:
+                        return
+                    thumb = ImageTk.PhotoImage(img.resize((150, 90), Image.Resampling.LANCZOS))
+
+                    def update(photo):
+                        self.vision_img_lbl.config(image=photo, text="")
+                        self.vision_img_lbl.image = photo
+
+                    self.root.after(0, update, thumb)
+                except Exception:
+                    pass
+
+            retina.subscribe(on_frame)
+            cortex.start_ambient()
+            return
+
+        # Legacy engine: no shared feed, keep the original standalone loop.
         def vision_loop():
             while True:
                 try:
                     img = self.vision.capture_screen_pil()
                     if img:
-                        img_thumb = img.resize((150, 90), Image.Resampling.LANCZOS)
-                        tk_img = ImageTk.PhotoImage(img_thumb)
-                        
+                        tk_img = ImageTk.PhotoImage(img.resize((150, 90), Image.Resampling.LANCZOS))
+
                         def update_ui_vision(photo):
                             self.vision_img_lbl.config(image=photo, text="")
                             self.vision_img_lbl.image = photo
-                            
+
                         self.root.after(0, update_ui_vision, tk_img)
                 except Exception:
                     pass

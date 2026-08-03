@@ -291,10 +291,15 @@ class Cortex:
             if lane == "pathfinder":
                 result = self.pathfinder.execute(step, ctx, active_window=before.window_title, model=model)
             else:
+                # VIGIL's description of the current screen is what lets "click that" resolve:
+                # the tree has no control named "that", and the thing being pointed at often has
+                # no accessible name at all.
+                ambient = self.vigil.current_view(require_same_screen=False)
                 result = self.hands.execute(
                     step, before, ctx,
                     vision_locate=lambda d: self.retina.locate(d, ctx),
                     history=self.history, model=model, correction=correction,
+                    ambient_hint=ambient.text if ambient else "",
                 )
             correction = ""
 

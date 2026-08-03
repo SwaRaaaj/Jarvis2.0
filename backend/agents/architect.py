@@ -159,9 +159,17 @@ Rules:
             return None
 
         steps: List[PlanStep] = []
+        seen_descriptions: set = set()
         for item in raw_steps[:10]:
             if not isinstance(item, dict):
                 continue
+            # Speech repetition ("click that click that and play it") is one instruction said
+            # twice, not two actions. Planning it as two guarantees the second fails, burns the
+            # step budget, and reports the order unfinished. Observed live.
+            key = re.sub(r"\W+", " ", str(item.get("description") or "")).strip().lower()
+            if key and key in seen_descriptions:
+                continue
+            seen_descriptions.add(key)
             description = str(item.get("description") or "").strip()
             if not description:
                 continue

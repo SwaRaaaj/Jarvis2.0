@@ -302,3 +302,51 @@ def test_anaphora_resolves_from_history(anchor, instagram_elements):
 def test_no_history_means_no_blind_click(anchor, instagram_elements):
     target = anchor.ground_order("do it again", snapshot(instagram_elements), history=[], allow_model=False)
     assert not target.resolved, "with nothing to refer back to, clicking anything would be a guess"
+
+
+# ======================================================================
+# Clicking robustness — regressions from a real failed run
+# ======================================================================
+
+
+def test_window_chrome_never_wins_by_default(anchor):
+    """The observed failure: asked to click a YouTube video, the only controls UI Automation could
+    see were the window buttons, so 'Minimize' won by being the only candidate. Chromium and
+    Electron apps routinely expose nothing but window chrome."""
+    snap = snapshot([
+        el("Minimize", "ButtonControl", 1800, 20),
+        el("Maximize", "ButtonControl", 1850, 20),
+        el("Close", "ButtonControl", 1900, 20),
+    ])
+    target = anchor.ground_order("click the video", snap, allow_model=False)
+    assert not target.resolved, "clicking Minimize is worse than admitting we can't see it"
+
+
+def test_window_chrome_is_still_clickable_when_actually_asked_for(anchor):
+    snap = snapshot([el("Minimize", "ButtonControl", 1800, 20), el("Close", "ButtonControl", 1900, 20)])
+    target = anchor.ground_order("click Minimize", snap, allow_model=False)
+    assert target.resolved and target.element.name == "Minimize"
+
+
+def test_click_that_resolves_from_what_is_on_screen(anchor):
+    """"click that" names nothing, and a video thumbnail has no accessible name — the only way to
+    find it is to describe it to vision. VIGIL already knows what it is."""
+    asked = []
+
+    def locate(description):
+        asked.append(description)
+        return (640, 400)
+
+    snap = snapshot([el("Minimize", "ButtonControl", 1800, 20)])
+    target = anchor.ground_order(
+        "click that", snap, vision_locate=locate, history=[], allow_model=False,
+        ambient_hint='the video titled "Goo Goo Dolls - Iris (Live in Buffalo)" is playing',
+    )
+    assert target.resolved
+    assert target.method == "vision"
+    assert "Goo Goo Dolls" in asked[0]
+
+
+def test_ambient_hint_is_condensed_to_something_searchable(anchor):
+    assert anchor._condense_hint('It looks like the video titled "Iris - Live" is playing') == "Iris - Live"
+    assert "watching" in anchor._condense_hint("Okay, so you're watching a live performance. It is loud.")

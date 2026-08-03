@@ -2,12 +2,27 @@ import mss
 import mss.tools
 from PIL import Image, ImageDraw
 import io
+import os
 import base64
 import re
 import requests
 import pyautogui
 from typing import Dict, Any, Tuple, Optional, List
 import uiautomation as auto
+
+try:
+    import win32gui
+    import win32process
+    HAS_WIN32 = True
+except ImportError:
+    HAS_WIN32 = False
+
+# Window classes that are never a user-facing target: the desktop itself, the taskbar, tooltips,
+# and the invisible shell workers that sit in the z-order above real applications.
+_SHELL_CLASSES = {
+    "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Windows.UI.Core.CoreWindow",
+    "tooltips_class32", "ForegroundStaging", "MSCTFIME UI", "IME", "SysShadow",
+}
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 VISION_MODEL = "gemma3:4b"
@@ -104,12 +119,80 @@ class ScreenVision:
             print(f"[Tab Extraction Error]: {e}")
         return tabs
 
-    def find_visible_ui_elements(self, max_depth: int = 8, max_elements: int = 400) -> List[Dict[str, Any]]:
-        """Walks the active window's UI Automation tree to extract visible, named, on-screen elements
+    def get_target_window(self, exclude_self: bool = True) -> Tuple[Optional[int], str]:
+        """The window the user actually means, which is not always the foreground window.
+
+        This fixes a blindness that made JARVIS unable to click most things. The tree was always
+        rooted at `GetForegroundControl()` — but the moment you type or speak into JARVIS's own HUD
+        or dashboard, *that* becomes the foreground window. JARVIS would then walk its own four
+        controls, find no match for whatever you asked about, and eventually flail at its own
+        Minimize button. Observed live: asked to click a YouTube video, the active window was
+        "JARVIS Desktop AI Brain" with 4 controls visible, and the video was never even a candidate.
+
+        So: if the foreground window belongs to this process, look past it to the topmost window
+        that doesn't. EnumWindows returns windows in z-order, so the first match is the one visually
+        nearest the front.
+        """
+        if not HAS_WIN32:
+            return None, ""
+        own_pid = os.getpid()
+
+        def _is_usable(hwnd: int) -> Tuple[bool, str]:
+            try:
+                if not win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
+                    return False, ""
+                title = win32gui.GetWindowText(hwnd) or ""
+                if len(title.strip()) < 2:
+                    return False, ""
+                if win32gui.GetClassName(hwnd) in _SHELL_CLASSES:
+                    return False, ""
+                rect = win32gui.GetWindowRect(hwnd)
+                if (rect[2] - rect[0]) < 120 or (rect[3] - rect[1]) < 80:
+                    return False, ""
+                if exclude_self:
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    if pid == own_pid:
+                        return False, ""
+                return True, title
+            except Exception:
+                return False, ""
+
+        try:
+            fg = win32gui.GetForegroundWindow()
+            ok, title = _is_usable(fg)
+            if ok:
+                return fg, title
+        except Exception:
+            pass
+
+        candidates: List[Tuple[int, str]] = []
+
+        def _collect(hwnd, _):
+            ok, title = _is_usable(hwnd)
+            if ok:
+                candidates.append((hwnd, title))
+
+        try:
+            win32gui.EnumWindows(_collect, None)
+        except Exception:
+            return None, ""
+        return candidates[0] if candidates else (None, "")
+
+    def find_visible_ui_elements(self, max_depth: int = 8, max_elements: int = 400,
+                                 exclude_self: bool = True) -> List[Dict[str, Any]]:
+        """Walks the target window's UI Automation tree to extract visible, named, on-screen elements
         with their bounding boxes and center coordinates for instant (x, y) targeting."""
         elements = []
         try:
-            root = auto.GetForegroundControl()
+            root = None
+            hwnd, _ = self.get_target_window(exclude_self=exclude_self)
+            if hwnd:
+                try:
+                    root = auto.ControlFromHandle(hwnd)
+                except Exception:
+                    root = None
+            if not root:
+                root = auto.GetForegroundControl()
             if not root:
                 root = auto.GetRootControl()
 

@@ -81,6 +81,15 @@ _TYPE_HINTS: Dict[str, str] = {
     "window": "Window", "panel": "Pane",
 }
 
+# Window-management controls. Present on essentially every window, and never what someone means
+# when they point at content. Chromium and Electron apps (Chrome, VS Code, Discord, Slack) often
+# expose *nothing but* these through UI Automation, which is how "click that video" ended up
+# clicking Minimize: it was the only named control on offer, so it won by default.
+_WINDOW_CHROME = {
+    "minimize", "maximize", "restore", "close", "system", "system menu", "application",
+    "minimise", "maximise", "restore down", "move", "size", "title bar", "caption",
+}
+
 _ORDINAL_WORDS: Dict[str, int] = {
     "first": 1, "1st": 1, "second": 2, "2nd": 2, "third": 3, "3rd": 3, "fourth": 4, "4th": 4,
     "fifth": 5, "5th": 5, "sixth": 6, "6th": 6, "seventh": 7, "7th": 7, "eighth": 8, "8th": 8,
@@ -309,13 +318,20 @@ class AnchorAgent(Agent):
         body = self._strip_ordinal_words(body)
         full_body = _strip_determiners(body)
         body = self._strip_type_nouns(body, type_hint, allow_empty=ordinal is not None or _only_type_noun(body, type_hint))
-        body = _strip_determiners(body)
 
-        # If nothing but pointing-words survives ("do it again", "close this"), there is no name to
-        # match and history has to supply the referent.
+        # The anaphora check has to run BEFORE determiners are stripped. "that" is both a
+        # determiner and a pointing word: strip it first and "click that" becomes an empty referent
+        # that nothing recognises as anaphoric, so it never reaches history or VIGIL for
+        # resolution. That is precisely why "click that" used to fall through to the model and get
+        # answered with whatever control happened to be lying around.
         residual = [t for t in normalize(body).split() if t]
         if residual and all(t in _ANAPHORIC_TOKENS for t in residual):
             body, anaphoric_marker = "", True
+        else:
+            body = _strip_determiners(body)
+            residual = [t for t in normalize(body).split() if t]
+            if residual and all(t in _ANAPHORIC_TOKENS for t in residual):
+                body, anaphoric_marker = "", True
 
         return Referent(text=body, full_text=full_body, ordinal=ordinal, type_hint=type_hint,
                         payload=payload, is_anaphoric=anaphoric_marker and not body, raw=raw)
@@ -376,6 +392,14 @@ class AnchorAgent(Agent):
         """Scores every on-screen element against the referent. Pure, deterministic, no I/O —
         which is what makes ANCHOR's behaviour assertable in tests rather than vibes."""
         pool: List[ScreenElement] = [e for e in snapshot.elements if e.name and len(e.name) >= 2]
+
+        # Window chrome is excluded unless the order actually asked for it. Without this, a window
+        # whose content UI Automation cannot see (any Chromium/Electron app) offers only Minimize,
+        # Maximize and Close — and "click the video" confidently picks one of them.
+        asked_for_chrome = normalize(referent.text) in _WINDOW_CHROME
+        if not asked_for_chrome:
+            content = [e for e in pool if normalize(e.name) not in _WINDOW_CHROME]
+            pool = content
 
         if referent.type_hint:
             typed = [e for e in pool if referent.type_hint.lower() in e.type.lower()]
@@ -521,16 +545,52 @@ class AnchorAgent(Agent):
         vision_locate: Optional[Callable[[str], Optional[Tuple[int, int]]]] = None,
         history: Optional[List[Dict[str, str]]] = None,
         allow_model: bool = True,
+        ambient_hint: str = "",
     ) -> GroundedTarget:
-        """extract + ground in one call — the entry point HANDS uses."""
+        """extract + ground in one call — the entry point HANDS uses.
+
+        `ambient_hint` is VIGIL's description of what is currently on screen. It is what makes
+        "click that" work: the accessibility tree has no control named "that", and a video
+        thumbnail or canvas-rendered element has no accessible name at all, so the only way to find
+        it is to describe it to the vision model. VIGIL already knows what it is.
+        """
         referent = self.extract_referent(order, history)
-        if referent.is_anaphoric and history:
-            resolved = self.resolve_anaphora(history)
+
+        if referent.is_anaphoric:
+            resolved = self.resolve_anaphora(history) if history else ""
             if resolved:
                 referent = Referent(text=resolved, type_hint=referent.type_hint,
                                     ordinal=referent.ordinal, raw=order)
                 self._emit(ctx, "ground", f"resolved '{order}' to earlier target '{resolved}'")
+            elif ambient_hint:
+                # Nothing in conversation history to point back at, but VIGIL is watching and can
+                # say what is on screen. Hand that straight to vision rather than giving up.
+                described = self._condense_hint(ambient_hint)
+                self._emit(ctx, "ground", f"resolving '{order}' from what's on screen: {described!r}")
+                target = self._vision_fallback(
+                    Referent(text=described, raw=order), f'"{order}" -> {described}',
+                    ctx, vision_locate, "the order pointed at something without naming it",
+                )
+                if target.resolved:
+                    return target
+
         return self.ground(referent, snapshot, ctx, vision_locate, allow_model)
+
+    @staticmethod
+    def _condense_hint(text: str) -> str:
+        """Reduces VIGIL's prose to something a vision model can search for.
+
+        Prefers an explicitly quoted title — VIGIL routinely reports things like
+        'the video titled "Goo Goo Dolls - Iris (Live in Buffalo)"' — and otherwise falls back to
+        the first clause, which is where the subject almost always sits.
+        """
+        quoted = re.search(r'[""\'"]([^""\'"]{4,90})[""\'"]', text or "")
+        if quoted:
+            return quoted.group(1).strip()
+        first = re.split(r"[.;\n]", (text or "").strip())[0]
+        first = re.sub(r"^\s*(okay|so|well|it looks like|i can see|looks like|there'?s)\b[,\s]*",
+                       "", first, flags=re.IGNORECASE).strip()
+        return first[:90]
 
     def _disambiguate(
         self, referent: Referent, shortlist: List[ScreenElement],

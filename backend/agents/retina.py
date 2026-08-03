@@ -221,12 +221,25 @@ class RetinaAgent(Agent):
         return self.capture_frame().digest
 
     def _active_window(self) -> Dict[str, Any]:
-        if self.telemetry is None:
-            return {"title": "", "app": ""}
-        try:
-            return self.telemetry.get_active_window() or {}
-        except Exception:
-            return {"title": "", "app": ""}
+        window: Dict[str, Any] = {"title": "", "app": ""}
+        if self.telemetry is not None:
+            try:
+                window = self.telemetry.get_active_window() or window
+            except Exception:
+                pass
+        # When JARVIS's own HUD holds focus — which it does every time you type or speak to it —
+        # the foreground window is JARVIS, not the app you are talking about. ScreenVision looks
+        # past itself to pick the real target; the reported title has to agree with the element
+        # tree, or SENTINEL verifies against a window nobody is looking at.
+        if self.vision is not None and hasattr(self.vision, "get_target_window"):
+            try:
+                hwnd, title = self.vision.get_target_window()
+                if title:
+                    window = dict(window)
+                    window["title"] = title
+            except Exception:
+                pass
+        return window
 
     def active_window_title(self) -> str:
         """The foreground window title, without walking the UI Automation tree.

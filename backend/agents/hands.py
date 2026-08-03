@@ -147,6 +147,7 @@ class HandsAgent(Agent):
         history: Optional[List[Dict[str, str]]] = None,
         model: str = SMART_MODEL,
         correction: str = "",
+        ambient_hint: str = "",
     ) -> Dict[str, Any]:
         """Performs one step. Returns the tool result, annotated with grounding and scope info."""
         self.executions += 1
@@ -174,11 +175,29 @@ class HandsAgent(Agent):
         # An anaphoric step ("do it again", "the other one") names nothing itself, but ANCHOR can
         # recover the referent from history — so it belongs on the grounded path, not the model one.
         if (action == "click_element" or referent.text or referent.ordinal is not None
-                or (referent.is_anaphoric and history)):
+                or referent.is_anaphoric):
             target = self.anchor.ground_order(
                 step.target or order_text, snapshot, ctx,
-                vision_locate=vision_locate, history=history,
+                vision_locate=vision_locate, history=history, ambient_hint=ambient_hint,
             )
+            if not target.resolved and vision_locate is not None and (referent.text or ambient_hint):
+                # Last resort before giving up: describe it to the vision model. The accessibility
+                # tree simply cannot see canvas-rendered content, video thumbnails or icon-only
+                # controls, and refusing to act there is what made JARVIS feel unable to click
+                # "any part" of a page.
+                described = referent.text or self.anchor._condense_hint(ambient_hint)
+                self._emit(ctx, "status", f"not in the accessibility tree — looking for {described!r} visually")
+                coords = None
+                try:
+                    coords = vision_locate(described)
+                except Exception:
+                    coords = None
+                if coords:
+                    result = self._invoke("click_coordinate", {"x": int(coords[0]), "y": int(coords[1])},
+                                          ctx, referent, matched_name=described)
+                    result["grounding"] = {"method": "vision", "confidence": 0.6, "referent": described}
+                    return result
+
             if target.resolved:
                 self.deterministic += 1
                 double = bool(re.search(r"\bdouble[- ]?click\b", order_text, re.IGNORECASE)) \

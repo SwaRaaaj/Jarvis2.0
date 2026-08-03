@@ -21,9 +21,12 @@ into the prompt (see ScreenSnapshot.describe_for_prompt).
 
 from __future__ import annotations
 
+import base64
 import hashlib
+import io
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .base import (
@@ -42,6 +45,37 @@ MIN_RECHECK_INTERVAL = 0.12
 # A snapshot older than this is always re-derived, digest or not, as a guard against a stuck
 # capture pipeline silently serving a frozen view of the world.
 MAX_SNAPSHOT_AGE = 8.0
+
+# Adaptive feed rates. A screen mid-animation deserves smooth frames; a screen nobody is touching
+# does not deserve two full JPEG encodes a second forever.
+FPS_ACTIVE = 5.0
+FPS_IDLE = 0.5
+IDLE_AFTER = 3.0          # seconds without meaningful change before dropping to the idle rate
+
+# Below this the frame differs only by cursor blink, caret flicker or JPEG noise.
+NOISE_FLOOR = 0.012
+
+
+@dataclass
+class Frame:
+    """One tick of the live screen feed."""
+
+    seq: int = 0
+    digest: str = ""
+    magnitude: float = 0.0        # 0..1, how much changed since the previous frame
+    captured_at: float = field(default_factory=time.time)
+    jpeg_b64: Optional[str] = None
+    # The 16x16 reduction this frame's digest was built from. Kept so consumers can measure *how
+    # far* the screen has drifted from an earlier frame, not just whether it differs at all.
+    thumb: Optional[bytes] = None
+
+    @property
+    def age(self) -> float:
+        return time.time() - self.captured_at
+
+    @property
+    def changed(self) -> bool:
+        return self.magnitude > NOISE_FLOOR
 
 
 class RetinaAgent(Agent):
@@ -68,34 +102,123 @@ class RetinaAgent(Agent):
         self._dirty: bool = False
         self._vision_cache: Dict[Tuple[str, str], str] = {}
 
+        # --- live feed state ---------------------------------------------------------
+        self._feed_thread: Optional[threading.Thread] = None
+        self._feed_stop = threading.Event()
+        self._latest: Optional[Frame] = None
+        self._prev_thumb: Optional[bytes] = None
+        self._subscribers: List[Callable[[Frame], None]] = []
+        self._seq: int = 0
+        self._last_change_at: float = 0.0
+        self._want_jpeg: bool = False
+
         # Instrumentation — these are the numbers that justify the agent existing.
         self.walks: int = 0            # actual UI Automation tree walks performed
         self.requests: int = 0         # snapshot() calls served
         self.cache_hits: int = 0
         self.vision_calls: int = 0
         self.vision_cache_hits: int = 0
+        self.frames_captured: int = 0
+        self.frames_encoded: int = 0   # JPEG encodes actually performed
+        self.frames_published: int = 0 # frames handed to subscribers (changed frames only)
+        self.grabs_saved: int = 0      # duplicate mss grabs avoided by serving the feed's frame
 
     # ------------------------------------------------------------------
     # Frame digest — the cheap "did anything change?" test
     # ------------------------------------------------------------------
 
-    def frame_digest(self) -> str:
-        """A 16x16 grayscale digest of the current screen.
+    @staticmethod
+    def _thumb_bytes(img) -> Optional[bytes]:
+        """16x16 grayscale reduction — the basis of both the digest and the change magnitude.
 
         Deliberately lossy: it must flag real UI changes (a menu opening, a page loading) while
-        ignoring cursor blink and antialiasing noise. Downscaling to 256 pixels does exactly that,
-        and costs orders of magnitude less than a UI Automation walk.
+        ignoring cursor blink and antialiasing noise. 256 pixels does exactly that, and costs
+        orders of magnitude less than a UI Automation walk.
+        """
+        try:
+            return img.convert("L").resize((16, 16)).tobytes()
+        except Exception:
+            return None
+
+    @staticmethod
+    def change_magnitude(prev: Optional[bytes], cur: Optional[bytes]) -> float:
+        """Mean absolute difference between two thumbnails, normalised to 0..1.
+
+        The digest alone is a boolean — same or different — which cannot distinguish a caret blink
+        from a whole new window. Magnitude is what lets the feed pick a frame rate and lets VIGIL
+        decide whether a change is worth spending a multi-second vision call on.
+        """
+        if not prev or not cur or len(prev) != len(cur):
+            return 1.0 if cur else 0.0
+        total = 0
+        for a, b in zip(prev, cur):
+            total += a - b if a > b else b - a
+        return total / (len(cur) * 255.0)
+
+    def capture_frame(self, want_jpeg: bool = False, quality: int = 40, scale: float = 0.35) -> Frame:
+        """One screen grab that produces everything downstream needs at once.
+
+        Previously the digest check, the dashboard stream and the HUD thumbnail each did their own
+        independent `mss` grab of the full screen every cycle. This is the single producer they all
+        now read from.
         """
         if self.vision is None:
-            return ""
+            return Frame(seq=self._seq, digest="", magnitude=0.0)
         try:
             img = self.vision.capture_screen_pil()
-            if img is None:
-                return ""
-            small = img.convert("L").resize((16, 16))
-            return hashlib.md5(small.tobytes()).hexdigest()
         except Exception:
-            return ""
+            img = None
+        if img is None:
+            return Frame(seq=self._seq, digest=self._last_digest, magnitude=0.0)
+
+        self.frames_captured += 1
+        thumb = self._thumb_bytes(img)
+        digest = hashlib.md5(thumb).hexdigest() if thumb else ""
+        magnitude = self.change_magnitude(self._prev_thumb, thumb)
+
+        jpeg = None
+        if want_jpeg:
+            # Encoding is skipped entirely when nobody is watching, which is the common case for
+            # the desktop HUD running without the web dashboard open.
+            try:
+                frame_img = img
+                if scale != 1.0:
+                    frame_img = img.resize((int(img.width * scale), int(img.height * scale)))
+                buf = io.BytesIO()
+                frame_img.save(buf, format="JPEG", quality=quality)
+                jpeg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+                self.frames_encoded += 1
+            except Exception:
+                jpeg = None
+
+        with self._lock:
+            self._prev_thumb = thumb
+            self._seq += 1
+            frame = Frame(seq=self._seq, digest=digest, magnitude=magnitude, jpeg_b64=jpeg, thumb=thumb)
+            self._latest = frame
+            if frame.changed:
+                self._last_change_at = frame.captured_at
+        return frame
+
+    def frame_digest(self) -> str:
+        """Current screen digest.
+
+        Reuses the feed's most recent frame instead of taking another full-screen grab — that
+        duplicate grab was happening on every single snapshot() call.
+
+        Reuse is gated on the feed actually running. Without a producer continuously refreshing
+        frames there is no guarantee `_latest` reflects the screen *now*, and serving a stale
+        digest would make a changed screen look unchanged — exactly the failure this cache is
+        supposed to detect.
+        """
+        if self.feed_running:
+            with self._lock:
+                latest = self._latest
+            max_age = 1.5 / FPS_ACTIVE
+            if latest is not None and latest.digest and latest.age < max_age:
+                self.grabs_saved += 1
+                return latest.digest
+        return self.capture_frame().digest
 
     def _active_window(self) -> Dict[str, Any]:
         if self.telemetry is None:
@@ -104,6 +227,16 @@ class RetinaAgent(Agent):
             return self.telemetry.get_active_window() or {}
         except Exception:
             return {"title": "", "app": ""}
+
+    def active_window_title(self) -> str:
+        """The foreground window title, without walking the UI Automation tree.
+
+        This goes through win32gui, which works from any thread. The full tree walk does not:
+        `uiautomation` needs COM initialised per-thread and raises "CoInitialize has not been
+        called" from a bare background thread. Background consumers that only want a label must
+        use this rather than snapshot().
+        """
+        return str(self._active_window().get("title") or "")
 
     def _walk(self) -> List[ScreenElement]:
         self.walks += 1
@@ -173,6 +306,87 @@ class RetinaAgent(Agent):
             if ctx is not None:
                 self._emit(ctx, "status", f"perceived {len(elements)} controls in \"{snap.window_title[:40]}\"")
             return snap
+
+    # ------------------------------------------------------------------
+    # The live feed: one producer, many consumers
+    # ------------------------------------------------------------------
+
+    def subscribe(self, callback: Callable[[Frame], None]) -> Callable[[], None]:
+        """Registers a consumer of changed frames. Returns an unsubscribe function.
+
+        Consumers are notified only when a frame actually differs from the last one, so a static
+        screen costs subscribers nothing at all.
+        """
+        with self._lock:
+            self._subscribers.append(callback)
+            self._want_jpeg = True
+        def unsubscribe() -> None:
+            with self._lock:
+                if callback in self._subscribers:
+                    self._subscribers.remove(callback)
+                self._want_jpeg = bool(self._subscribers)
+        return unsubscribe
+
+    def start_feed(self, quality: int = 40, scale: float = 0.35) -> None:
+        """Starts the single background capture loop.
+
+        Rate adapts to what the screen is doing: FPS_ACTIVE while things are moving, dropping to
+        FPS_IDLE once nothing has meaningfully changed for IDLE_AFTER seconds. A user watching an
+        animation gets smooth frames; a user staring at a static editor costs almost nothing.
+        """
+        if self._feed_thread is not None and self._feed_thread.is_alive():
+            return
+        self._feed_stop.clear()
+
+        def loop() -> None:
+            while not self._feed_stop.is_set():
+                started = time.time()
+                try:
+                    with self._lock:
+                        want = self._want_jpeg
+                        subs = list(self._subscribers)
+                    frame = self.capture_frame(want_jpeg=want, quality=quality, scale=scale)
+
+                    if frame.changed:
+                        # A changed frame invalidates the cached UIA tree for free — the next
+                        # snapshot() re-walks without needing its own detection pass.
+                        self.invalidate()
+                        self.frames_published += 1
+                        for cb in subs:
+                            try:
+                                cb(frame)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                idle = (time.time() - self._last_change_at) > IDLE_AFTER
+                interval = 1.0 / (FPS_IDLE if idle else FPS_ACTIVE)
+                self._feed_stop.wait(max(0.0, interval - (time.time() - started)))
+
+        self._feed_thread = threading.Thread(target=loop, daemon=True, name="retina-feed")
+        self._feed_thread.start()
+
+    def stop_feed(self) -> None:
+        self._feed_stop.set()
+        thread = self._feed_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+        self._feed_thread = None
+
+    @property
+    def feed_running(self) -> bool:
+        return self._feed_thread is not None and self._feed_thread.is_alive()
+
+    def latest_frame(self) -> Optional[Frame]:
+        with self._lock:
+            return self._latest
+
+    def idle_seconds(self) -> float:
+        """How long the screen has been visually still. VIGIL uses this to pick its moment."""
+        if not self._last_change_at:
+            return 0.0
+        return time.time() - self._last_change_at
 
     def invalidate(self) -> None:
         """Called after any action that touched the screen, so the next read re-derives.
@@ -276,6 +490,7 @@ class RetinaAgent(Agent):
 
     def stats(self) -> Dict[str, Any]:
         hit_rate = (self.cache_hits / self.requests) if self.requests else 0.0
+        publish_rate = (self.frames_published / self.frames_captured) if self.frames_captured else 0.0
         return {
             "snapshot_requests": self.requests,
             "tree_walks": self.walks,
@@ -284,4 +499,12 @@ class RetinaAgent(Agent):
             "walks_avoided": max(0, self.requests - self.walks),
             "vision_calls": self.vision_calls,
             "vision_cache_hits": self.vision_cache_hits,
+            "feed_running": self.feed_running,
+            "frames_captured": self.frames_captured,
+            "frames_encoded": self.frames_encoded,
+            "frames_published": self.frames_published,
+            "frames_suppressed": max(0, self.frames_captured - self.frames_published),
+            "publish_rate": round(publish_rate, 3),
+            "grabs_saved": self.grabs_saved,
+            "idle_seconds": round(self.idle_seconds(), 1),
         }

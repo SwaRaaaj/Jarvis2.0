@@ -20,8 +20,8 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 <br>
 
 ![Local Vision](https://img.shields.io/badge/vision-100%25_local-10b981?style=flat-square)
-![Agents](https://img.shields.io/badge/agents-11-06b6d4?style=flat-square)
-![Tests](https://img.shields.io/badge/tests-229_passing-10b981?style=flat-square)
+![Agents](https://img.shields.io/badge/agents-12-06b6d4?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-256_passing-10b981?style=flat-square)
 ![Grounding](https://img.shields.io/badge/grounding_accuracy-100%25-10b981?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-Windows-8b5cf6?style=flat-square)
 
@@ -38,6 +38,7 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 - [The Agent Cortex](#-the-agent-cortex)
 - [How an Order Flows](#-how-an-order-flows)
 - [How JARVIS Sees](#-how-jarvis-sees)
+- [VIGIL — Instant Screen Answers](#️-vigil--why-whats-on-my-screen-is-instant)
 - [How JARVIS Learns](#-how-jarvis-learns)
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
@@ -55,11 +56,11 @@ decides one action at a time, clicks and types like a human, and verifies its ow
 ## 🎯 What Is This?
 
 Most "AI assistants" are text boxes that call APIs. JARVIS is different: it reads the **live Windows
-accessibility tree**, looks at **actual screenshots** with a **locally-run vision model**, and
+accessibility tree**, watches a **live video feed of your screen** through a **locally-run vision model**, and
 drives your **real mouse and keyboard**.
 
-> 🔒 **Your screen stays yours.** Screenshot understanding runs entirely on your machine via Ollama
-> (`gemma3:4b`). No image is ever uploaded. See [The Model Stack](#-the-model-stack).
+> 🔒 **Your screen stays yours.** The whole video feed is read on your machine via Ollama
+> (`gemma3:4b`). Not one frame is ever uploaded. See [The Model Stack](#-the-model-stack).
 
 Say *"open Instagram and message Alice"* and it will launch the inbox, visually locate that
 specific conversation among dozens, click it, and type — checking after every step that the screen
@@ -90,7 +91,7 @@ time: ~2,000 tokens of tool schemas per call, a full UI-Automation tree walk per
 
 A three-action task cost roughly **six 70B round-trips**.
 
-JARVIS 2.0 splits that work across **11 specialised agents**, each with one job and a small prompt.
+JARVIS 2.0 splits that work across **12 specialised agents**, each with one job and a small prompt.
 Most orders now resolve with **zero model calls at all**.
 
 ---
@@ -112,8 +113,8 @@ Most orders now resolve with **zero model calls at all**.
 <td width="50%" valign="top">
 
 ### 👁️ Screen Perception
-- Live UI-Automation tree walk (every named control + pixel coords)
-- Screenshot capture at 2 Hz
+- **Always watching** — continuous 2 Hz video feed, streamed live to both UIs
+- Live UI-Automation tree (every named control + pixel coords)
 - Local vision model for icon-only / canvas UI
 - Grid-overlay coordinate grounding
 - Change detection via frame digest
@@ -162,17 +163,17 @@ flowchart TB
 
     subgraph Brain["🧠  Agent Cortex"]
         CORTEX["CORTEX orchestrator"]
-        AGENTS["10 specialised agents"]
+        AGENTS["11 specialised agents"]
     end
 
     subgraph Perception["👁️  Perception & Actuation"]
-        SV["ScreenVision<br/>UIA tree · mss capture"]
+        SV["ScreenVision<br/>UIA tree · live video feed"]
         OS["OSAutomation<br/>pyautogui · pywin32"]
         TEL["PCTelemetry<br/>psutil"]
     end
 
     subgraph Local["🖥️  LOCAL — Ollama on your machine"]
-        OLLAMA["gemma3:4b<br/><b>all screen understanding</b><br/>never leaves your PC"]
+        OLLAMA["gemma3:4b<br/><b>reads the live video feed</b><br/>never leaves your PC"]
     end
 
     subgraph Cloud["☁️  CLOUD — Groq"]
@@ -226,7 +227,7 @@ flowchart LR
         F["<b>llama-3.1-8b-instant</b><br/>routing · verification · phrasing"]
     end
 
-    PIX["📸 Your screenshots"] --> L
+    PIX["🎥 Your live screen feed<br/><i>continuous video, 2 Hz</i>"] --> L
     TXT["📝 Control names & orders<br/><i>text only</i>"] --> C
 
     style L fill:#065f46,stroke:#10b981,color:#fff
@@ -236,13 +237,13 @@ flowchart LR
 
 | | Runs where | Model | Does what |
 |:---|:---|:---|:---|
-| 👁️ **Vision** | 🖥️ **Local** — Ollama | `gemma3:4b` | Reads screenshots, answers *"what's on screen?"*, locates icon-only controls |
+| 👁️ **Vision** | 🖥️ **Local** — Ollama | `gemma3:4b` | Reads the live screen feed, answers *"what's on screen?"*, locates icon-only controls |
 | 🧠 **Planning** | ☁️ Cloud — Groq | `llama-3.3-70b-versatile` | Decomposes orders, picks tools |
 | ⚡ **Routing** | ☁️ Cloud — Groq | `llama-3.1-8b-instant` | Intent classification, disambiguation, verification |
 
 ### 🔒 Your screen never leaves your machine
 
-**No screenshot is ever uploaded anywhere.** Image data goes only to `localhost:11434`. Groq
+**No frame of your screen is ever uploaded anywhere.** The video feed goes only to `localhost:11434`. Groq
 receives text — control names pulled from the Windows accessibility tree, and your typed or spoken
 order. That's the whole reason vision is local.
 
@@ -255,7 +256,7 @@ both documented in the source:
    it inventing tools that didn't exist. The 70B model refuses to invent a tool natively — verified
    by prompting it to call a fake `banana_launcher` and watching it pick a real tool every time.
 2. **No local vision alternative on Groq.** Groq has no vision-capable model on this account, so
-   screenshot understanding *had* to stay on `gemma3:4b`. It never moved, and it never will need to.
+   screen understanding *had* to stay on `gemma3:4b`. It never moved, and it never will need to.
 
 The class is still named `OllamaEngine` — a fossil from when everything ran locally.
 
@@ -270,7 +271,7 @@ The class is still named `OllamaEngine` — a fossil from when everything ran lo
 
 ## 🧬 The Agent Cortex
 
-Eleven agents. Each does one job, with a small prompt and a small tool surface.
+Twelve agents. Each does one job, with a small prompt and a small tool surface.
 
 | Agent | Role | Model calls |
 |:------|:-----|:------------|
@@ -283,6 +284,7 @@ Eleven agents. Each does one job, with a small prompt and a small tool surface.
 | 🛡️ **SENTINEL** | Verifies each step from screen evidence | Usually **0** |
 | 🗣️ **NARRATOR** | Composes the spoken reply *and* the detailed report | 0–1 *(8B)* |
 | 🎓 **SCHOLAR** | Mines the execution log into zero-cost shortcuts | 0 |
+| 👁️‍🗨️ **VIGIL** | Ambient observer — keeps a warm understanding of the screen so questions answer instantly | background only |
 | 👂 **EARS** | Voice gate — was this speech even addressed to JARVIS? | 0 |
 | 🧠 **CORTEX** | Orchestrator wiring them all together | — |
 
@@ -394,7 +396,108 @@ sequenceDiagram
 
 ## 👁️ How JARVIS Sees
 
-Two perception paths, and choosing between them correctly is what makes JARVIS fast.
+JARVIS is **always watching** — but not always *thinking* about what it sees. Perception runs in
+three layers with very different costs, and using the cheapest one that can answer the question is
+what makes it fast.
+
+```mermaid
+flowchart TB
+    subgraph A["🔴  LAYER 1 — THE LIVE FEED, ALWAYS ON"]
+        direction LR
+        CAP["🎥 One shared capture loop<br/><b>5 Hz active · 0.5 Hz idle</b><br/>~1 ms/frame"]
+        CAP --> DIG["16×16 digest + change magnitude"]
+        DIG --> GATE{"changed?"}
+        GATE -->|no| DROP["🚫 suppressed<br/><i>nothing sent, nothing encoded</i>"]
+        GATE -->|yes| PUB["📡 published to subscribers<br/>dashboard · HUD · VIGIL"]
+    end
+
+    subgraph B["🟡  LAYER 2 — STRUCTURE, ON DEMAND"]
+        TREE["🌳 UI Automation tree<br/>every control + coords<br/><b>~630 ms</b> · re-walked only on change"]
+    end
+
+    subgraph C["🟢  LAYER 3 — UNDERSTANDING"]
+        VIG["👁️‍🗨️ VIGIL<br/><i>ambient, in the background</i><br/>looks once when the screen settles"]
+        VIS["🧠 gemma3:4b<br/><b>5–19 s</b>"]
+        VIG --> VIS
+    end
+
+    PUB --> TREE
+    PUB --> VIG
+    TREE -->|"no control matches"| VIS
+
+    style A fill:#7f1d1d,stroke:#ef4444,color:#fff
+    style B fill:#78350f,stroke:#f59e0b,color:#fff
+    style C fill:#065f46,stroke:#10b981,color:#fff
+```
+
+| Layer | Runs | Cost | What it gives you |
+|:---|:---|:---|:---|
+| 🎥 **Live feed** | **Continuous, adaptive** | ~1 ms/frame | Live mirror, change detection |
+| 🌳 **Accessibility tree** | On demand, cached | ~630 ms | Every control name + exact coords |
+| 👁️‍🗨️ **VIGIL** | Background, when settled | free to *ask* | A warm description of the screen |
+| 🧠 **Vision model** | Last resort | 5–19 s | Pixels the tree can't describe |
+
+### One capture, many consumers
+
+The screen used to be grabbed independently by **four** different places — RETINA's change check,
+the dashboard broadcaster, the desktop HUD thumbnail, and every vision call — each taking its own
+full-screen grab twice a second. RETINA now owns a single capture loop and everything else
+subscribes to it.
+
+### The feed only speaks when something happens
+
+Frames are **change-gated**. The old broadcaster pushed a fresh base64 JPEG over the WebSocket
+every 500 ms whether or not a single pixel had moved. Measured on a real idle screen:
+
+```
+26 frames captured  →  1 published  →  25 suppressed     (96% suppressed)
+```
+
+JPEG encoding is skipped entirely when nobody is subscribed, which is the normal case for the
+desktop HUD running without the dashboard open.
+
+### The rate follows the screen
+
+`5 Hz` while things are moving, dropping to `0.5 Hz` after 3 seconds of stillness. An animation
+gets smooth frames; a static editor costs almost nothing.
+
+---
+
+## 👁️‍🗨️ VIGIL — why "what's on my screen?" is instant
+
+The feed watches continuously, but until VIGIL nothing *understood* it continuously. Every screen
+question meant a cold 5–19 second vision call, from a standing start, even on a screen that had
+been untouched for ten minutes.
+
+VIGIL watches the feed and — when the screen has meaningfully changed **and then settled** — spends
+one vision call in the background and caches what it saw. The next question is answered from that.
+
+**Measured on a real screen:**
+
+| | Before | After |
+|:---|:---|:---|
+| *"what can you see"* | **10.30 s** | **0.53 s** |
+| asked again | 10.30 s | **0.45 s** |
+| vision calls for 2 questions | 2 | **1** *(a background one)* |
+
+It is built to be invisible, and to be an optimisation that can never become a dependency:
+
+- **Only on real change** — drift must exceed a threshold; a blinking caret is not news
+- **Only once settled** — describes a finished page, not a half-painted one
+- **Never during a task** — CORTEX pauses it while an order runs, because the vision model is
+  single-threaded and ambient curiosity must not compete with real work
+- **Rate limited** — a hard floor between looks, so a full-screen video can't pin the model
+- **Fails silent** — Ollama down? It backs off. The screen-query path just behaves as it did before
+
+> ⚠️ Freshness is judged by how far the screen has **drifted**, not by exact equality. An
+> identical-digest test sounds correct but is far too strict in practice — a blinking terminal
+> cursor changes the digest while leaving the description perfectly accurate. Measured live, that
+> strictness meant the cache essentially never served and every question fell through to a cold
+> call anyway.
+
+### Choosing between the tree and the model
+
+### Choosing between the tree and the model
 
 ```mermaid
 flowchart TD
@@ -420,7 +523,7 @@ flowchart TD
 
 > **Why the grid trick?** Small vision models are unreliable at regressing raw pixel coordinates,
 > but they're good at *reading a printed label off an image*. So JARVIS draws a labelled grid
-> (`A1`, `B3`, `C10`…) over the screenshot, asks which cell contains the target, and maps that cell
+> (`A1`, `B3`, `C10`…) over a frame from the feed, asks which cell contains the target, and maps it
 > back to real screen pixels.
 
 **Measured on real hardware:** a UIA walk costs ~630 ms; a cached read costs ~0 ms; a vision call
@@ -466,11 +569,11 @@ A learned rule fires **without review**, so the bar to create one is deliberatel
 
 <table>
 <tr><th align="left">Layer</th><th align="left">Technology</th><th align="left">Purpose</th></tr>
-<tr><td><b>🖥️ Vision (local)</b></td><td>Ollama · <code>gemma3:4b</code></td><td><b>All screenshot understanding + coordinate grounding. Runs on your machine; images never leave it.</b></td></tr>
+<tr><td><b>🖥️ Vision (local)</b></td><td>Ollama · <code>gemma3:4b</code></td><td><b>Reads the live screen feed + grounds coordinates. Runs on your machine; no frame ever leaves it.</b></td></tr>
 <tr><td><b>☁️ Reasoning (cloud)</b></td><td>Groq · <code>llama-3.3-70b-versatile</code></td><td>Planning, tool selection <i>(text only)</i></td></tr>
 <tr><td></td><td>Groq · <code>llama-3.1-8b-instant</code></td><td>Classification, disambiguation, verification <i>(text only)</i></td></tr>
 <tr><td><b>Perception</b></td><td><code>uiautomation</code></td><td>Windows accessibility tree</td></tr>
-<tr><td></td><td><code>mss</code> + <code>Pillow</code></td><td>Fast screen capture</td></tr>
+<tr><td></td><td><code>mss</code> + <code>Pillow</code></td><td>Continuous screen capture — the 2 Hz video feed</td></tr>
 <tr><td></td><td><code>psutil</code></td><td>Hardware telemetry</td></tr>
 <tr><td><b>Actuation</b></td><td><code>pyautogui</code></td><td>Mouse & keyboard</td></tr>
 <tr><td></td><td><code>pywin32</code></td><td>Window management, foreground focus</td></tr>
@@ -480,7 +583,7 @@ A learned rule fires **without review**, so the bar to create one is deliberatel
 <tr><td><b>Dashboard</b></td><td>React 18 + Vite 5 + lucide-react</td><td>Web command center</td></tr>
 <tr><td><b>Desktop HUD</b></td><td>Tkinter</td><td>Always-on-top floating widget</td></tr>
 <tr><td><b>Storage</b></td><td>SQLite</td><td>Profile, execution log, learned rules</td></tr>
-<tr><td><b>Testing</b></td><td>pytest</td><td>229 tests, fully offline</td></tr>
+<tr><td><b>Testing</b></td><td>pytest</td><td>256 tests, fully offline</td></tr>
 </table>
 
 ---
@@ -514,16 +617,18 @@ jarvis/
 │   │   ├── sentinel.py             🛡️ verification
 │   │   ├── narrator.py             🗣️ response composition
 │   │   ├── scholar.py              🎓 learning
+│   │   ├── vigil.py                👁️‍🗨️ ambient observer
 │   │   ├── ears.py                 👂 voice gate
 │   │   └── cortex.py               🧠 orchestrator
 │   │
-│   └── 🧪 tests/                   229 tests · no Windows/network/model needed
+│   └── 🧪 tests/                   256 tests · no Windows/network/model needed
 │       ├── conftest.py             Fakes for screen, OS, model
 │       ├── test_anchor.py          Grounding & scope guard
 │       ├── test_retina.py          Caching & observation
 │       ├── test_routing.py         TRIAGE + ARCHITECT
 │       ├── test_executors.py       PATHFINDER + HANDS
 │       ├── test_verification.py    SENTINEL + NARRATOR
+│       ├── test_feed.py            Live feed + VIGIL
 │       ├── test_learning.py        SCHOLAR + EARS
 │       ├── test_cortex.py          End-to-end pipeline
 │       └── test_benchmark_old_vs_new.py   Head-to-head accuracy
@@ -586,8 +691,8 @@ ollama pull gemma3:4b     # ~3.3 GB, one-time download
 ollama serve              # keep this running
 ```
 
-This is JARVIS's **eyes** — every screenshot it understands goes through this model, entirely on
-your machine. Verify it's up:
+This is JARVIS's **eyes** — the entire live video feed of your screen is read by this model,
+entirely on your machine. Verify it's up:
 
 ```bash
 curl http://localhost:11434/api/tags
@@ -772,6 +877,9 @@ Generated from real UI-Automation captures of a running Chrome window, with real
 | Deterministic order (*"what time is it"*) | **0.01 s**, 0 model calls |
 | Chat reply (8B) | 0.39 s, 1 call |
 | 🐌 Vision call (`gemma3:4b`) | **5–19 s** |
+| 🎥 Live feed frame | ~1 ms |
+| *"what can you see"* — cold | 10.30 s |
+| *"what can you see"* — via VIGIL | **0.53 s** |
 
 ### Model calls per task
 
@@ -788,7 +896,7 @@ Generated from real UI-Automation captures of a running Chrome window, with real
 
 ```bash
 cd backend
-python -m pytest tests/ -q                                  # all 229
+python -m pytest tests/ -q                                  # all 256
 python -m pytest tests/test_anchor.py -v                    # grounding
 python -m pytest tests/test_benchmark_old_vs_new.py -s      # print the benchmark
 ```
@@ -797,7 +905,7 @@ Every agent takes its screen, OS and model dependencies by injection, so the ent
 any machine — **no Windows, no microphone, no Groq account, no Ollama daemon required**.
 
 ```
-229 passed in 8.92s
+256 passed in 14.2s
 ```
 
 ---
@@ -814,18 +922,19 @@ Being straight with you about what doesn't work yet:
 | 🧪 **No automated live-app tests** | The suite uses fakes for all OS actions. Real clicking on real apps is manually verified only |
 | 🎨 **Dashboard styling is partial** | The JSX uses Tailwind-style class names, but Tailwind isn't installed — only the custom classes in `index.css` actually apply |
 | 🌐 **STT needs internet** | Speech recognition uses Google's API |
-| 📈 **Vision accuracy unmeasured** | No labelled screenshot benchmark exists yet |
+| 📈 **Vision accuracy unmeasured** | No labelled screen-frame benchmark exists yet |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Labelled screenshot benchmark for vision accuracy
+- [ ] Labelled screen-frame benchmark for vision accuracy
 - [ ] Replace `locate_via_vision` grid trick with a proper grounding model
 - [ ] Offline/local STT (Whisper) to drop the internet dependency
 - [ ] Install Tailwind properly, or convert the dashboard to pure custom CSS
 - [ ] Automated live-app integration tests in a Windows VM
 - [ ] Multi-monitor support
+- [ ] Let VIGIL summarise a session timeline ("what was I working on?")
 - [ ] Undo / action rollback
 - [ ] Per-app learned tool preferences in SCHOLAR
 
